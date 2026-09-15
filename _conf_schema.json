@@ -1,0 +1,89 @@
+{
+  "account": {
+    "description": "水电系统账号（身份证号，非学号）",
+    "type": "string",
+    "default": "",
+    "obvious_hint": true,
+    "hint": "完美校园 outid；用学号会报『人员信息不存在』。也支持 enc:v1: 密文（用 secure_store.py encrypt-value 生成）"
+  },
+  "customercode": {
+    "description": "学校代码",
+    "type": "int",
+    "default": 1000145
+  },
+  "rooms": {
+    "description": "默认监控的房间列表（兜底用，可不填）",
+    "type": "text",
+    "default": "# 每行一条：房间名|roomverify\n# 例：1栋A-102|101-1--12-102\n# 说明行(#开头)和空行不会生效；本表仅作未绑定用户的兜底，普通用户发 /电量绑定 自助绑定即可\n\n",
+    "obvious_hint": true,
+    "hint": "填写格式：房间名|roomverify（英文竖线分隔），例：1栋A-102|101-1--12-102。# 开头的说明行和空行会被忽略。roomverify 不用抓包：绑定账号后发 /电量房间 即可看到。普通用户不用填这里",
+    "editor_mode": true,
+    "editor_language": "yaml"
+  },
+  "threshold": {
+    "description": "电量低于此值提醒（度）",
+    "type": "int",
+    "default": 20
+  },
+  "cron_hours": {
+    "description": "每日定时播报的小时",
+    "type": "string",
+    "default": "8,20",
+    "hint": "逗号分隔，如 8,20 表示每天 8 点和 20 点"
+  },
+  "notify_origin": {
+    "description": "定时播报目标会话（自动生成）",
+    "type": "string",
+    "default": "",
+    "invisible": true
+  },
+  "encrypt_key": {
+    "description": "敏感信息加密密钥（留空则用环境变量 DORM_POWER_KEY 或密钥文件）",
+    "type": "string",
+    "default": "",
+    "obvious_hint": true,
+    "hint": "留空即可：默认读环境变量 DORM_POWER_KEY 或仓库根的 .dorm_power_key 文件。配了密钥后，用户绑定的账号（身份证号）和房间信息会加密落盘；没配则明文存储并启动告警。换密钥后旧数据将读不出来，请先用 secure_store.py decrypt 导出"
+  },
+  "scan_qps": {
+    "description": "搜校限速：每秒请求数",
+    "type": "int",
+    "default": 6,
+    "hint": "1-20。调高会更快，但更容易被限流/封 IP；默认 6 是防风控的保守值"
+  },
+  "scan_concurrency": {
+    "description": "搜校并发数",
+    "type": "int",
+    "default": 6,
+    "hint": "1-16。与 scan_qps 共同决定扫描压力，默认 6"
+  },
+  "scan_max_hits": {
+    "description": "搜校命中几个学校代码后提前结束",
+    "type": "int",
+    "default": 3,
+    "hint": "1-10。命中即停可以显著减少请求数"
+  },
+  "scan_cooldown_minutes": {
+    "description": "同一账号搜校的冷却时间（分钟）",
+    "type": "int",
+    "default": 10,
+    "hint": "0-1440，0 表示不限制。防止重复触发全量扫描"
+  },
+  "api_url": {
+    "description": "接口地址（上游换域名时才填）",
+    "type": "string",
+    "default": "",
+    "hint": "留空用默认地址"
+  },
+  "api_command": {
+    "description": "接口 command 字段（上游改版时才填）",
+    "type": "string",
+    "default": "",
+    "hint": "留空用 JBSWaterElecService"
+  },
+  "odd_fields": {
+    "description": "剩余电量字段候选（逗号分隔，按顺序探测）",
+    "type": "string",
+    "default": "",
+    "hint": "留空用 odd,surpluselec,surplusElec,remain,balance。上游改字段名时在这里补上新字段名即可"
+  }
+}
