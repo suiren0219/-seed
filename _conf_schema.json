@@ -32,10 +32,10 @@
     "hint": "逗号分隔，如 8,20 表示每天 8 点和 20 点"
   },
   "notify_origin": {
-    "description": "定时播报目标会话（自动生成）",
+    "description": "默认房间的定时播报目标会话（一般留空）",
     "type": "string",
     "default": "",
-    "invisible": true
+    "hint": "只有「用默认房间兜底」的管理员才需要填：普通用户各自发 /电量推送 就会写入自己的目标会话。这里填 AstrBot 的会话标识（形如 aiocqhttp:GroupMessage:123456，可从日志里 /电量推送 那一行抄），留空则默认房间不参与定时播报"
   },
   "encrypt_key": {
     "description": "敏感信息加密密钥（留空则用环境变量 DORM_POWER_KEY 或密钥文件）",
