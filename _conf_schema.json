@@ -33,13 +33,13 @@
   },
   "warn_threshold": {
     "description": "低电量预警阈值（度）",
-    "type": "number",
+    "type": "float",
     "default": 20,
     "hint": "剩余电量低于此值时发出预警，默认 20 度"
   },
   "warn_drop_per_hour": {
     "description": "掉电速率预警阈值（度/小时）",
-    "type": "number",
+    "type": "float",
     "default": 5,
     "hint": "电量下降速率超过此值时预警（可能是大功率电器或异常），默认 5 度/小时"
   },
