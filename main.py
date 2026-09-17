@@ -400,6 +400,9 @@ class DormPowerPlugin(Star):
             return {"account": "", "customercode": 1000145, "rooms": [], "origin": ""}
 
     def _threshold(self) -> float:
+        """低电量预警阈值：优先读面板 warn_threshold，回退到 config.yaml warn.threshold。"""
+        if self.config is not None and self.config.get("warn_threshold") is not None:
+            return float(self.config["warn_threshold"])
         if self.config is not None and self.config.get("threshold"):
             return float(self.config["threshold"])
         try:

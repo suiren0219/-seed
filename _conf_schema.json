@@ -14,9 +14,9 @@
   "rooms": {
     "description": "默认监控的房间列表（兜底用，可不填）",
     "type": "text",
-    "default": "# 每行一条：房间名|roomverify\n# 例：1栋A-102|101-1--12-102\n# 说明行(#开头)和空行不会生效；本表仅作未绑定用户的兜底，普通用户发 /电量绑定 自助绑定即可\n\n",
+    "default": "# 每行一条：房间名|roomverify\n# 例：1栋A-102|101-1--12-102\n# 说明：本表仅作未绑定用户的兜底，普通用户发 /电量绑定 自助绑定即可\n\n",
     "obvious_hint": true,
-    "hint": "填写格式：房间名|roomverify（英文竖线分隔），例：1栋A-102|101-1--12-102。# 开头的说明行和空行会被忽略。roomverify 不用抓包：绑定账号后发 /电量房间 即可看到。普通用户不用填这里",
+    "hint": "填写格式：房间名|roomverify（英文竖线分隔）。roomverify 获取方式：绑定账号后发 /电量房间 即可看到。普通用户不必填写这里，直接使用 /电量绑定 自助绑定。",
     "editor_mode": true,
     "editor_language": "yaml"
   },
@@ -29,7 +29,19 @@
     "description": "每日定时播报的小时",
     "type": "string",
     "default": "8,20",
-    "hint": "逗号分隔，如 8,20 表示每天 8 点和 20 点"
+    "hint": "逗号分隔，如 8,20 表示每天早 8 点和晚 20 点各播报一次"
+  },
+  "warn_threshold": {
+    "description": "低电量预警阈值（度）",
+    "type": "number",
+    "default": 20,
+    "hint": "剩余电量低于此值时发出预警，默认 20 度"
+  },
+  "warn_drop_per_hour": {
+    "description": "掉电速率预警阈值（度/小时）",
+    "type": "number",
+    "default": 5,
+    "hint": "电量下降速率超过此值时预警（可能是大功率电器或异常），默认 5 度/小时"
   },
   "notify_origin": {
     "description": "默认房间的定时播报目标会话（一般留空）",
