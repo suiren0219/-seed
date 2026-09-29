@@ -1,0 +1,229 @@
+# 使用说明
+
+本文档讲怎么装、怎么用、每项配置是什么意思、出错怎么办。
+只想知道这项目能干什么、长什么样，看 [README.md](README.md)。
+
+目录
+
+- [第一步：安装 AstrBot 插件](#第一步安装-astrbot-插件)
+- [第二步：找到学校代码](#第二步找到学校代码)
+- [第三步：绑定账号并添加房间](#第三步绑定账号并添加房间)
+- [日常使用](#日常使用)
+- [配置说明](#配置说明)- [独立命令行用法](#独立命令行用法)
+- [加密与密钥](#加密与密钥)
+- [测试与体检](#测试与体检)
+- [打包与分发](#打包与分发)
+- [常见问题](#常见问题)
+
+## 第一步：安装 AstrBot 插件
+
+1. 在 AstrBot 管理面板进入「插件市场 / 插件管理」页面。
+2. 上传 `astrbot_plugin_dorm_power.zip`（用 `python pack_all.py` 生成），或把 `astrbot_plugin_dorm_power/` 目录整个拷进 AstrBot 的 `data/plugins/`。
+3. 重启 AstrBot，或在面板里重载插件。
+
+注意：
+
+- **装之前先卸载面板里的旧版本**，重复上传同名目录会报「目录已存在」。
+- AstrBot 上传插件 zip 时要求包内有 `README.md`，`pack_all.py` 已经处理，不要手工删。
+- 日志里出现「未配置密钥，用户数据将明文存储」说明插件已加载成功，只是还没配加密密钥（见 [加密与密钥](#加密与密钥)）。
+
+## 第二步：找到学校代码
+
+每所学校在完美校园里有一个数字代码（`customercode`）。面板里默认填的 `1000000` 只是占位符，**必须换成你自己学校的代码**，三种获取方式：
+
+**方式一：让机器人自己搜（推荐）**
+
+```
+/电量搜校 你的账号
+```
+
+机器人会先试「历史命中过的学校代码」候选池，未命中再分段全量扫描（先扫新平台段 1000000-1010000，再扫旧编码段 1-3000），默认 6 请求/秒、6 并发，全量最多几十分钟，命中若干条就提前结束。结果发回当前会话。
+
+扫出多个代码时逐个 `/电量绑定`，再用 `/电量房间` 验证——能列出你宿舍的那个才是对的。
+
+**方式二：抓包（最准确）**
+
+1. 电脑开热点或用同一 Wi-Fi，手机连上；
+2. 电脑装 Fiddler Classic，端口 8888，勾选 Allow remote computers 和 Decrypt HTTPS；
+3. 手机 Wi-Fi 手动代理指向电脑 IP:8888，浏览器访问 `http://电脑IP:8888` 下载并安装证书；
+4. 手机进支付宝 → 完美校园 → 电量页；
+5. 在 Fiddler 里找发往 `xqh5.17wanxiao.com` 的请求，URL 里的 `customercode=` 后面就是学校代码。
+
+**方式三：问同学或管理员**
+
+已经配好的人可以直接查到。
+
+## 第三步：绑定账号并添加房间
+
+```
+/电量绑定 <学校代码> <账号>
+/电量房间
+/电量添加
+/电量
+```
+
+账号填**完美校园的 outid，一般是身份证号，不是学号**。用学号会报「人员信息不存在」。
+
+`/电量房间` 列出的是账号在水电系统里已经绑定的房间（这个绑定关系在支付宝小程序里建立，机器人只能读取）。`/电量添加` 不带参数表示全部加入监控。
+
+如果 `/电量房间` 说没有绑定房间，先回支付宝小程序「完美校园」里把宿舍房间绑定一遍。
+
+## 日常使用
+
+| 命令 | 说明 |
+|---|---|
+| `/电量` | 查询已监控房间的电量，附带今日用电、近 7 日、上月、累计购电 |
+| `/电量添加 1 2` | 按序号添加；`/电量添加 102` 按房间号关键字添加；`/电量添加 a8 102` 多个关键字自动缩小范围 |
+| `/电量删除 1`、`/电量删除 101` | 按序号或关键字移除房间 |
+| `/电量推送` | 在当前会话订阅每日播报（默认 8 点、20 点），在哪个群发就推哪个群 |
+| `/电量解绑` | 清除自己的绑定与房间数据 |
+
+写法宽松：`电量删除1`、`电量绑定1000000 你的账号`、`/电量绑定 1000000，你的账号` 都能识别；参数里的中英文逗号、顿号、空格都会当分隔符。
+
+预警分两类：
+
+- **低电量**：剩余 ≤ `warn_threshold`（默认 20 度）时提醒充值；
+- **掉电异常**：相邻两次记录之间每小时掉电 ≥ `warn_drop_per_hour`（默认 5 度/小时）时提醒，可能是大功率电器在跑。
+
+独立运行模式会把每次读数记进 `data/history.json` 用于算速率；AstrBot 插件模式按定时播报的间隔比较两次读数。
+
+## 配置说明
+
+插件配置在 AstrBot 管理面板的「插件配置」里改；独立运行模式改 `config.yaml`（由 `config.example.yaml` 复制而来）。
+
+面板按四块展示：**常用**（账号、学校代码、默认房间、加密密钥）在上，然后是 **⏰ 预警与播报**、**🔍 搜校节流**、**🛠 接口兜底** 三个折叠分组。默认房间和播报目标只在填了账号时才展开，普通用户不用管这些。
+
+### 常用（面板首屏）
+
+| 配置项 | 默认值 | 说明 |
+|---|---|---|
+| `account` | 空 | 水电系统账号（完美校园 outid，一般是身份证号）。支持 `enc:v1:` 密文；留空则由各用户自己 `/电量绑定` |
+| `customercode` | `1000000`（占位） | 学校代码，**要改成自己学校的**；不确定时用 `/电量搜校`（会先扫 1000000 这一段） |
+| `rooms` | 说明模板 | 默认监控房间，每行 `房间名\|roomverify`；仅作未绑定用户的兜底，普通用户不用填 |
+| `encrypt_key` | 空 | 加密密钥；留空则读环境变量 `DORM_POWER_KEY`，再不行读仓库根 `.dorm_power_key` |
+| `notify_origin` | 空 | 默认房间的定时播报目标会话，由 `/电量推送` 自动写入，一般不用手填 |
+| `room_keyword` | 空 | 独立运行模式下 `getbindroom` 有多个房间时用的筛选关键词 |
+
+### ⏰ 预警与播报
+
+| 配置项 | 默认值 | 说明 |
+|---|---|---|
+| `cron_hours` | `8,20` | 每日播报小时，逗号分隔 |
+| `warn_threshold` | `20` | 低电量预警阈值（度），面板上是滑块 |
+| `warn_drop_per_hour` | `5` | 掉电速率预警阈值（度/小时），面板上是滑块 |
+| `threshold` | `20` | 旧的低电量阈值，仅作旧配置兼容 |
+
+### 🔍 搜校节流
+
+| 配置项 | 默认值 | 范围 | 说明 |
+|---|---|---|---|
+| `scan_qps` | `6` | 1-20 | 每秒请求数 |
+| `scan_concurrency` | `6` | 1-16 | 并发数 |
+| `scan_max_hits` | `3` | 1-10 | 命中够数即停 |
+| `scan_cooldown_minutes` | `10` | 0-60 | 同一账号两次搜校的最小间隔 |
+
+### 🛠 接口兜底
+
+上游接口改版时用这几项顶住，不必改代码：
+
+| 配置项 | 默认值 | 说明 |
+|---|---|---|
+| `api_url` | 空（内置地址） | 接口地址 |
+| `api_command` | 空（`JBSWaterElecService`） | 请求里的 `command` 字段 |
+| `odd_fields` | 空（内置候选表） | 剩余电量字段候选，逗号分隔，按顺序探测 |
+| `cmd_bind` / `cmd_index` / `cmd_login` | `getbindroom` / `h5_getstuindexpage` / `login` | 三个 cmd 名 |
+
+独立运行模式对应的配置在 `config.yaml` 的 `api` 段，多出 `timeout` / `retries` / `backoff` / `odd_paths` / `list_fields` 等更细的开关，默认值即可用。
+
+## 独立命令行用法
+
+不装 AstrBot 也能跑，适合先在本地把账号和房间调通。
+
+```bash
+pip install -r requirements.txt
+cp config.example.yaml config.yaml     # Windows: copy config.example.yaml config.yaml
+# 编辑 config.yaml 填 account / customercode / rooms
+```
+
+```bash
+python cli.py probe    # 只列账号绑定的房间，不记历史
+python cli.py room     # 打印某个房间的完整返回，用于字段适配
+python cli.py once     # 查一次：取电量、记历史、打印播报与预警
+python cli.py poll     # 只输出预警（无预警则静默），适合丢给 crontab
+python cli.py watch    # 常驻轮询，间隔取 config.yaml 的 schedule.interval_minutes
+```
+
+`config.yaml` 的 `notify.channel` 决定推送方式：`console` 打印到终端，`feishu` 用飞书自定义机器人 webhook（可开签名校验），`astrbot` 回推给机器人。
+
+## 加密与密钥
+
+推荐一开始就配密钥，别让身份证号明文躺在磁盘上。
+
+```bash
+python secure_store.py genkey --write            # 生成 .dorm_power_key（本地私有，勿分发）
+python secure_store.py encrypt-value 你的账号     # 输出 enc:v1:... 粘进 config.yaml
+python secure_store.py encrypt data/config/xxx.json   # 或把整个 JSON 转成密文
+python secure_store.py decrypt <文件或密文>       # 需要迁移时解密
+python secure_store.py selftest                  # 自检
+```
+
+- 密钥来源优先级：`encrypt_key` 配置 > 环境变量 `DORM_POWER_KEY` > 仓库根 `.dorm_power_key`。
+- `config.yaml` 里的明文敏感值会触发体检告警，建议改成 `enc:v1:` 密文，或用 `account_env: DORM_POWER_ACCOUNT` 从环境变量取。
+- 装了 `cryptography` 用 Fernet(AES)；没装则回退到内置 PBKDF2 方案（零依赖，强度较低，建议装上）。
+- 换密钥后旧数据读不出来，换之前先用 `decrypt` 导出。
+- 历史文件里的 `roomverify` 默认只存 HMAC 摘要（`rk_` 开头），旧的明文记录仍能匹配。
+- 日志与回执里的账号一律脱敏：首尾各隐 4 位（`440000200001010000` → `****0020000101****`）。身份证前 4 位是省市地区码、后 4 位是顺序码加校验位，两头都会缩小范围，所以都不留。
+
+## 测试与体检
+
+```bash
+python test_security_scan.py    # 离线：加密存储 / 历史去明文 / 限速熔断 / 字段容错 / 预警速率 / 接口封装契约
+python test_plugin_parsing.py   # 离线：插件参数与房间解析、账号脱敏
+python test_plugin_smoke.py     # 离线：真加载一次插件，校验 @register 与 8 条命令
+python secure_store.py selftest # 离线：加密后端自检
+python check_workspace.py       # 体检：语法 / 配置解密 / 包与源码一致性 / 版本号 / 隐私残留
+python test_power.py            # 在线：真实接口联调，需要 config.yaml 且能连上学校接口
+python test_v2_logic.py         # 在线：插件核心逻辑的接口侧验证
+```
+
+`test_plugin_smoke.py` 防的是「插件能 import 但一条命令都没注册」这类问题：`@register` 贴错类时，语法检查和其余测试都是绿的，只有真加载才看得出来。
+
+## 打包与分发
+
+```bash
+python pack_all.py
+```
+
+生成两个 zip：
+
+- `astrbot_plugin_dorm_power.zip`：插件安装包，只含可外发文件，已脱敏，可直接传 AstrBot 面板或发给别人，包内 `BUILD.txt` 有每个文件的 sha256 便于核对版本；
+- `dorm_power_full_backup.zip`：整包备份，含 `config.yaml`、`.dorm_power_key`、`data/`，**勿外传**。
+
+外发前自查：
+
+```bash
+python scan_privacy.py astrbot_plugin_dorm_power.zip
+```
+
+## 常见问题
+
+**提示「人员信息不存在」**
+用学号了。换成完美校园 outid，一般是身份证号。
+
+**`/电量房间` 说没有绑定房间**
+先去支付宝小程序「完美校园」里把宿舍房间绑定一遍，再回来执行。机器人只能读到已经存在的绑定关系。
+
+**查到的电量是 0 或者明显不对**
+多半是房间选错了。照明和空调是两块表、两条记录，用 `/电量房间` 看房间名再 `/电量添加`。
+
+**`/电量搜校` 扫完了没结果**
+可能账号填错（不是身份证号）、学校不在已覆盖的编码段（1-3000、1000000-1010000）、或者扫描中途被风控中止（消息里会说明）。可以隔一阵重试，或者用抓包方式拿学校代码。
+
+**提示「电量字段解析失败」**
+上游改了返回结构。看日志里的结构指纹（只有键名和类型，不含值）和 `data/schema_probe.log`，把新的字段名填进 `odd_fields`（独立模式还有 `odd_paths`）即可，不用改代码。
+
+**定时播报没有发出来**
+先确认发过 `/电量推送`（它决定推到哪个会话），再看面板 `cron_hours` 是否包含当前小时；独立运行模式则检查 `config.yaml` 的 `schedule` 和 `notify`。
+
+**换机器后读不出用户数据**
+用户数据是用密钥加密的。把原机器的 `.dorm_power_key`（或环境变量 `DORM_POWER_KEY`）一起迁移过去。

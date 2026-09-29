@@ -1,0 +1,30 @@
+# Secrets and local configuration
+config.yaml
+astrbot_plugin_dorm_power/config.yaml
+.dorm_power_key
+*.key
+.env
+
+# Runtime data and diagnostics
+data/
+*.log
+
+# Python caches and local tooling
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.zcode/
+
+# Generated archives/backups
+*.zip
+
+# 隐私扫描模式：含本人身份证/学号/房号等具体值，绝不入库
+private_patterns.txt
+
+# Nested duplicate checkout retained locally
+astrbot_plugin_dorm_power/astrbot_plugin_dorm_power/
+
+# Local editor/system files
+.vscode/
+.idea/
+.DS_Store

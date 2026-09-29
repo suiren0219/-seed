@@ -1,0 +1,7 @@
+requests>=2.31
+pyyaml>=6.0
+apscheduler>=3.10
+aiohttp>=3.9
+# 可选：安装后敏感信息（账号/房间）使用 Fernet(AES) 加密落盘；
+# 未安装时自动回退到内置的 PBKDF2 方案（零依赖，强度较低）。
+cryptography>=42.0

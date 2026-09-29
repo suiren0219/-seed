@@ -1,0 +1,172 @@
+{
+  "account": {
+    "description": "🔑 默认账号（可不填）",
+    "type": "string",
+    "default": "",
+    "obvious_hint": true,
+    "hint": "完美校园 outid，不是学号。普通用户各自发 /电量绑定 即可，这里留空最省事。填 enc:v1: 密文可避免明文落盘（python secure_store.py encrypt-value 生成）"
+  },
+  "customercode": {
+    "description": "🏫 学校代码",
+    "type": "int",
+    "default": 1000000
+  },
+  "rooms": {
+    "description": "🏠 默认房间（兜底用，可不填）",
+    "type": "text",
+    "default": "# 一行一个房间，格式：房间名 | roomverify\n#\n# 例：\n#   1栋A-102  | 101-1--12-102\n#   1栋A-103  | 101-1--12-103\n#\n# roomverify 从哪来：绑定账号后发 /电量房间 即可看到\n# 说明行以 # 开头会被忽略，空行也会忽略\n\n",
+    "hint": "仅未绑定用户的兜底，普通用户直接发 /电量绑定 即可，不必填这里",
+    "editor_mode": true,
+    "editor_language": "yaml",
+    "editor_theme": "vs-light",
+    "full_width": true,
+    "condition": "account"
+  },
+  "notice": {
+    "description": "📣 已接入：/电量 · /电量绑定 · /电量房间 · /电量添加 · /电量删除 · /电量推送 · /电量解绑 · /电量搜校",
+    "type": "string",
+    "default": "",
+    "invisible": true
+  },
+  "notify_origin": {
+    "description": "📮 默认房间播报目标（留空）",
+    "type": "string",
+    "default": "",
+    "hint": "由 /电量推送 自动写入，无需手填",
+    "condition": "account"
+  },
+  "encrypt_key": {
+    "description": "🔐 加密密钥",
+    "type": "string",
+    "default": "",
+    "obvious_hint": true,
+    "hint": "留空则读环境变量 DORM_POWER_KEY 或仓库根 .dorm_power_key。配了密钥后用户账号与房间信息加密落盘，没配则明文存储并在启动日志告警。换密钥后旧数据读不出来，先用 secure_store.py decrypt 导出"
+  },
+  "schedule": {
+    "type": "object",
+    "description": "⏰ 预警与播报",
+    "hint": "什么时候播报、剩多少度提醒你充值",
+    "items": {
+      "cron_hours": {
+        "description": "每日播报小时",
+        "type": "string",
+        "default": "8,20",
+        "hint": "逗号分隔，8,20 = 每天 8 点和 20 点各播报一次"
+      },
+      "warn_threshold": {
+        "description": "低电量阈值",
+        "type": "int",
+        "default": 20,
+        "slider": {
+          "min": 1,
+          "max": 100,
+          "step": 1
+        }
+      },
+      "warn_drop_per_hour": {
+        "description": "掉电速率阈值",
+        "type": "float",
+        "default": 5,
+        "hint": "每小时掉电超过这个度数才提醒，过滤掉隔夜的低消耗",
+        "slider": {
+          "min": 0.5,
+          "max": 20,
+          "step": 0.5
+        }
+      },
+      "threshold": {
+        "description": "旧版低电量阈值（已弃用）",
+        "type": "int",
+        "default": 20,
+        "invisible": true
+      }
+    }
+  },
+  "scan": {
+    "type": "object",
+    "description": "🔍 搜校节流",
+    "hint": "只在 /电量搜校 时生效，调高更快也更容易被风控",
+    "items": {
+      "scan_qps": {
+        "description": "每秒请求数",
+        "type": "int",
+        "default": 6,
+        "slider": {
+          "min": 1,
+          "max": 20,
+          "step": 1
+        }
+      },
+      "scan_concurrency": {
+        "description": "并发数",
+        "type": "int",
+        "default": 6,
+        "slider": {
+          "min": 1,
+          "max": 16,
+          "step": 1
+        }
+      },
+      "scan_max_hits": {
+        "description": "命中几个学校后停止",
+        "type": "int",
+        "default": 3,
+        "hint": "命中即停能显著减少请求量",
+        "slider": {
+          "min": 1,
+          "max": 10,
+          "step": 1
+        }
+      },
+      "scan_cooldown_minutes": {
+        "description": "同一账号搜校冷却",
+        "type": "int",
+        "default": 10,
+        "hint": "0 表示不限",
+        "slider": {
+          "min": 0,
+          "max": 60,
+          "step": 1
+        }
+      }
+    }
+  },
+  "advanced": {
+    "type": "object",
+    "description": "🛠 接口兜底",
+    "hint": "只在完美校园改版、查不出电量时才需要动",
+    "items": {
+      "api_url": {
+        "description": "接口地址",
+        "type": "string",
+        "default": ""
+      },
+      "api_command": {
+        "description": "command 字段",
+        "type": "string",
+        "default": ""
+      },
+      "odd_fields": {
+        "description": "电量字段候选",
+        "type": "string",
+        "default": "",
+        "hint": "逗号分隔、按顺序探测，留空用 odd,surpluselec,surplusElec,remain,balance"
+      },
+      "cmd_bind": {
+        "description": "绑定房间 cmd",
+        "type": "string",
+        "default": "getbindroom"
+      },
+      "cmd_index": {
+        "description": "电量详情 cmd",
+        "type": "string",
+        "default": "h5_getstuindexpage"
+      },
+      "cmd_login": {
+        "description": "搜校探测 cmd",
+        "type": "string",
+        "default": "login"
+      }
+    }
+  }
+}

@@ -1,0 +1,44 @@
+# 宿舍电量监控配置（示例：分发时复制本文件为 config.yaml）
+# 敏感值不落明文：可填 enc:v1: 密文（python secure_store.py encrypt-value <原值>），
+# 也可以写 ${环境变量名}，或给 student.account_env 指定环境变量名。
+student:
+  account: ""                     # 完美校园 outid（一般是身份证号，非学号）
+  # account_env: DORM_POWER_ACCOUNT   # 可选：从环境变量读账号，优先级低于已填写的 account
+  customercode: 1000000           # 学校代码（默认值只是占位，改成自己学校的；可用 python cli.py probe 搜校）
+  rooms: []                       # 监控房间 [{name, roomverify}]，roomverify 通过抓包或 getbindroom 获取
+  room_keyword: ""                # getbindroom 兜底时的房间名关键词
+
+api:
+  url: "https://xqh5.17wanxiao.com/smartWaterAndElectricityService/SWAEServlet"
+  command: "JBSWaterElecService"
+  timeout: 10
+  retries: 2                      # 额外重试次数（网络错误 / 429 / 5xx，指数退避）
+  backoff: 0.6                    # 退避基数（秒）
+  cmd_bind: "getbindroom"         # 接口 cmd 名均可覆盖，上游改名时只改这里
+  cmd_index: "h5_getstuindexpage"
+  cmd_login: "login"
+  odd_paths: ["modlist.0.odd"]    # 剩余电量的取值路径（按顺序探测）
+  odd_fields: ["odd", "surpluselec", "surplusElec", "surplus_elec", "remain", "balance"]
+
+schedule:
+  cron_hours: [8, 20]
+  interval_minutes: 60
+  timezone: "Asia/Shanghai"
+
+warn:
+  threshold: 20
+  drop_per_hour: 5
+
+security:
+  key_env: "DORM_POWER_KEY"       # 加密密钥的环境变量名；也可用仓库根 .dorm_power_key 文件
+
+storage:
+  path: "data/history.json"
+  encrypt_rooms: true             # roomverify 以 HMAC 摘要存储，历史文件不留房间明文
+
+notify:
+  channel: "console"              # console / feishu / astrbot
+  feishu_webhook: ""
+  feishu_sign: ""
+  platform: "qq"
+  target_id: ""

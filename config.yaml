@@ -1,0 +1,23 @@
+# AstrBot 插件兜底配置（个人信息请填到 WebUI 插件配置，勿写进本文件随包分发）
+student:
+  account: ""                     # 完美校园 outid（一般=身份证号）
+  customercode: 1000145
+  rooms: []
+  room_keyword: ""
+
+api:
+  url: "https://xqh5.17wanxiao.com/smartWaterAndElectricityService/SWAEServlet"
+  command: "JBSWaterElecService"
+  timeout: 10
+
+schedule:
+  cron_hours: [8, 20]
+  timezone: "Asia/Shanghai"
+
+warn:
+  threshold: 20
+  drop_per_hour: 5
+
+notify:
+  platform: "qq"
+  target_id: ""
