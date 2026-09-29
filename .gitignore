@@ -24,6 +24,13 @@ private_patterns.txt
 # Nested duplicate checkout retained locally
 astrbot_plugin_dorm_power/astrbot_plugin_dorm_power/
 
+# 开发/测试工具只在本地维护，不随仓库分发
+test_*.py
+check_workspace.py
+pack_all.py
+scan_privacy.py
+CHANGELOG_*.md
+
 # Local editor/system files
 .vscode/
 .idea/

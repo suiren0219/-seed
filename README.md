@@ -12,7 +12,6 @@
 - **双预警**：剩余电量低于阈值提醒充值；掉电速率异常（可能有大功率电器）也会单独提醒，速率按相邻记录的间隔折算，避免把隔了十小时的低消耗误报成掉电。
 - **接口可配置**：地址、`command`、各 `cmd` 名、电量字段名都能在面板改，上游小改不必改代码。
 - **防风控**：全项目复用连接池，网络错误 / 429 / 5xx 指数退避重试；搜校限速 + 熔断，接口返回业务失败不重试。
-- **离线可测**：加密存储、历史去明文、限速熔断、字段容错、预警速率、插件加载都有不联网的测试。
 
 ## 效果
 
@@ -48,11 +47,7 @@
 
 需要 AstrBot（v3 及以上）和一个已接入的 QQ 机器人。完整步骤见 [USAGE.md](USAGE.md)。
 
-```bash
-python pack_all.py          # 生成 astrbot_plugin_dorm_power.zip
-```
-
-也可以直接把 `astrbot_plugin_dorm_power/` 目录拷进 AstrBot 的 `data/plugins/`，然后重启 AstrBot。
+把 `astrbot_plugin_dorm_power/` 目录拷进 AstrBot 的 `data/plugins/`，然后重启 AstrBot。
 装之前记得在面板里卸载旧版本，重复上传会报「目录已存在」。
 
 ## 管理员配置
@@ -87,22 +82,10 @@ python pack_all.py          # 生成 astrbot_plugin_dorm_power.zip
 ├── scheduler_job.py             # 多房间查询 + 阈值/掉电速率双预警
 ├── notifier.py                  # 推送渠道：console / 飞书 webhook / AstrBot
 ├── cli.py                       # 命令行入口：probe / room / once / poll / watch
-├── config.example.yaml          # 配置示例（复制成 config.yaml 使用）
-├── pack_all.py                  # 打包：插件安装包 + 整包备份
-├── check_workspace.py           # 工作区体检：语法/配置/包一致性/版本/隐私
-└── test_*.py                    # 离线测试与在线联调脚本
+└── config.example.yaml          # 配置示例（复制成 config.yaml 使用）
 ```
 
-## 测试
-
-```bash
-python test_security_scan.py    # 离线：加密存储 / 历史去明文 / 限速熔断 / 字段容错 / 预警速率
-python test_plugin_parsing.py   # 离线：插件参数与房间解析、账号脱敏
-python test_plugin_smoke.py     # 离线：真加载一次插件，校验 @register 与 8 条命令
-python secure_store.py selftest # 离线：加密后端自检
-python check_workspace.py       # 工作区体检
-python test_power.py            # 在线：真实接口联调（需要 config.yaml 且能访问学校接口）
-```
+开发与测试脚本（`test_*.py`、`check_workspace.py`、`pack_all.py`、`scan_privacy.py`）仅在作者本地维护，不随仓库分发。
 
 ## 数据来源与声明
 

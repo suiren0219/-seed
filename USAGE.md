@@ -11,20 +11,18 @@
 - [日常使用](#日常使用)
 - [配置说明](#配置说明)- [独立命令行用法](#独立命令行用法)
 - [加密与密钥](#加密与密钥)
-- [测试与体检](#测试与体检)
-- [打包与分发](#打包与分发)
 - [常见问题](#常见问题)
 
 ## 第一步：安装 AstrBot 插件
 
 1. 在 AstrBot 管理面板进入「插件市场 / 插件管理」页面。
-2. 上传 `astrbot_plugin_dorm_power.zip`（用 `python pack_all.py` 生成），或把 `astrbot_plugin_dorm_power/` 目录整个拷进 AstrBot 的 `data/plugins/`。
+2. 把 `astrbot_plugin_dorm_power/` 目录整个拷进 AstrBot 的 `data/plugins/`。
 3. 重启 AstrBot，或在面板里重载插件。
 
 注意：
 
 - **装之前先卸载面板里的旧版本**，重复上传同名目录会报「目录已存在」。
-- AstrBot 上传插件 zip 时要求包内有 `README.md`，`pack_all.py` 已经处理，不要手工删。
+- 目录里的 `README.md` 是 AstrBot 面板识别插件所需的，不要手工删。
 - 日志里出现「未配置密钥，用户数据将明文存储」说明插件已加载成功，只是还没配加密密钥（见 [加密与密钥](#加密与密钥)）。
 
 ## 第二步：找到学校代码
@@ -168,42 +166,11 @@ python secure_store.py selftest                  # 自检
 ```
 
 - 密钥来源优先级：`encrypt_key` 配置 > 环境变量 `DORM_POWER_KEY` > 仓库根 `.dorm_power_key`。
-- `config.yaml` 里的明文敏感值会触发体检告警，建议改成 `enc:v1:` 密文，或用 `account_env: DORM_POWER_ACCOUNT` 从环境变量取。
+- `config.yaml` 里的敏感值建议写成 `enc:v1:` 密文，或用 `account_env: DORM_POWER_ACCOUNT` 从环境变量取，不要明文落盘。
 - 装了 `cryptography` 用 Fernet(AES)；没装则回退到内置 PBKDF2 方案（零依赖，强度较低，建议装上）。
 - 换密钥后旧数据读不出来，换之前先用 `decrypt` 导出。
 - 历史文件里的 `roomverify` 默认只存 HMAC 摘要（`rk_` 开头），旧的明文记录仍能匹配。
 - 日志与回执里的账号一律脱敏：首尾各隐 4 位（`440000200001010000` → `****0020000101****`）。身份证前 4 位是省市地区码、后 4 位是顺序码加校验位，两头都会缩小范围，所以都不留。
-
-## 测试与体检
-
-```bash
-python test_security_scan.py    # 离线：加密存储 / 历史去明文 / 限速熔断 / 字段容错 / 预警速率 / 接口封装契约
-python test_plugin_parsing.py   # 离线：插件参数与房间解析、账号脱敏
-python test_plugin_smoke.py     # 离线：真加载一次插件，校验 @register 与 8 条命令
-python secure_store.py selftest # 离线：加密后端自检
-python check_workspace.py       # 体检：语法 / 配置解密 / 包与源码一致性 / 版本号 / 隐私残留
-python test_power.py            # 在线：真实接口联调，需要 config.yaml 且能连上学校接口
-python test_v2_logic.py         # 在线：插件核心逻辑的接口侧验证
-```
-
-`test_plugin_smoke.py` 防的是「插件能 import 但一条命令都没注册」这类问题：`@register` 贴错类时，语法检查和其余测试都是绿的，只有真加载才看得出来。
-
-## 打包与分发
-
-```bash
-python pack_all.py
-```
-
-生成两个 zip：
-
-- `astrbot_plugin_dorm_power.zip`：插件安装包，只含可外发文件，已脱敏，可直接传 AstrBot 面板或发给别人，包内 `BUILD.txt` 有每个文件的 sha256 便于核对版本；
-- `dorm_power_full_backup.zip`：整包备份，含 `config.yaml`、`.dorm_power_key`、`data/`，**勿外传**。
-
-外发前自查：
-
-```bash
-python scan_privacy.py astrbot_plugin_dorm_power.zip
-```
 
 ## 常见问题
 
