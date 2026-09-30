@@ -1,21 +1,39 @@
-# Security Policy
+# 安全策略
 
-## Supported Versions
+本项目会在机器人服务器上集中保存使用者的账号（完美校园 outid，通常是身份证号）
+与房间信息，安全问题的优先级高于新功能。
 
-Use this section to tell people about which versions of your project are
-currently being supported with security updates.
+## 支持的版本
 
-| Version | Supported          |
-| ------- | ------------------ |
-| 5.1.x   | :white_check_mark: |
-| 5.0.x   | :x:                |
-| 4.0.x   | :white_check_mark: |
-| < 4.0   | :x:                |
+| 版本 | 安全修复 |
+| --- | --- |
+| v2.2.x（main 分支） | ✅ 支持 |
+| 更早版本 | ❌ 请升级到 main |
 
-## Reporting a Vulnerability
+## 报告漏洞
 
-Use this section to tell people how to report a vulnerability.
+**请不要在公开 Issue 里描述可被利用的细节**（尤其是涉及密钥处理、加密实现、
+数据文件读取的部分）。
 
-Tell them where to go, how often they can expect to get an update on a
-reported vulnerability, what to expect if the vulnerability is accepted or
-declined, etc.
+推荐两种方式：
+
+1. GitHub 网页上本仓库的 **Security → Report a vulnerability**（安全通告草稿，
+   只有维护者可见）；
+2. 通过仓库主页资料里提供的联系方式私下联系作者。
+
+报告时请尽量附上：受影响的功能（如用户数据加密、脱敏、搜校限流）、复现步骤
+或最小概念验证、受影响的版本或 commit。维护者会在 **72 小时内**确认收到；
+确认后按严重程度在 1–2 周内发布修复并致谢报告者（愿意的话）。
+
+## 安全设计要点（供审计参考）
+
+- **落盘加密**：用户账号与房间信息整体加密存储。首选 `cryptography` 的
+  Fernet（AES-128-CBC + HMAC-SHA256）；未安装时回退内置 PBKDF2 密钥流方案
+  （`_FallbackCipher`，属「防明文落盘」的混淆级保护，不等同于抗专业离线破解）。
+- **密钥管理**：优先级为 配置项 > 环境变量 `DORM_POWER_KEY` > `.dorm_power_key`
+  文件；未配置密钥时不加密并在启动日志告警。
+- **脱敏**：日志与回执里的账号一律首尾各隐 4 位（`440000200001010000` →
+  `****0020000101****`）；历史记录中的房间凭证默认只存 HMAC 确定性摘要。
+- **接口侧克制**：对上游私有接口的请求带连接复用、指数退避、搜校限速与熔断，
+  避免被当作放大或滥用工具。
+- **最小化**：`/电量解绑` 删除该用户在本地的全部数据；不采集电量以外的任何信息。

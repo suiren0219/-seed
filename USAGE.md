@@ -172,6 +172,19 @@ python secure_store.py selftest                  # 自检
 - 历史文件里的 `roomverify` 默认只存 HMAC 摘要（`rk_` 开头），旧的明文记录仍能匹配。
 - 日志与回执里的账号一律脱敏：首尾各隐 4 位（`440000200001010000` → `****0020000101****`）。身份证前 4 位是省市地区码、后 4 位是顺序码加校验位，两头都会缩小范围，所以都不留。
 
+## 测试
+
+仓库自带不联网的单元测试（`tests/` 目录，pytest 收集）：
+
+```bash
+pip install -r requirements.txt -r requirements-dev.txt
+pytest
+```
+
+覆盖：加密存储 / 历史去明文 / 接口封装契约 / 字段容错 / 预警速率 / 搜校限速熔断 / 插件参数解析 / 插件加载冒烟。改完代码跑一遍，`test_plugin_smoke.py` 能提前抓住「@register 贴错类导致面板里一条命令都没有」这类只有真加载才会暴露的问题。
+
+在线联调与本地工具脚本（涉及真实账号配置，不入库）：`test_power.py`、`test_v2_logic.py`（真实接口联调）、`check_workspace.py`（工作区体检）、`pack_all.py`（打包）、`scan_privacy.py`（外发前隐私扫描）。
+
 ## 常见问题
 
 **提示「人员信息不存在」**

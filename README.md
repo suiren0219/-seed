@@ -12,6 +12,7 @@
 - **双预警**：剩余电量低于阈值提醒充值；掉电速率异常（可能有大功率电器）也会单独提醒，速率按相邻记录的间隔折算，避免把隔了十小时的低消耗误报成掉电。
 - **接口可配置**：地址、`command`、各 `cmd` 名、电量字段名都能在面板改，上游小改不必改代码。
 - **防风控**：全项目复用连接池，网络错误 / 429 / 5xx 指数退避重试；搜校限速 + 熔断，接口返回业务失败不重试。
+- **离线可测**：加密存储、历史去明文、限速熔断、字段容错、插件加载都有不联网的测试，见下方「测试」。
 
 ## 效果
 
@@ -74,18 +75,34 @@
 ## 目录结构
 
 ```
-├── astrbot_plugin_dorm_power/   # AstrBot 插件（main.py / _conf_schema.json / secure_store.py / README.md）
+├── astrbot_plugin_dorm_power/   # AstrBot 插件（唯一完整实现：main.py / _conf_schema.json / secure_store.py / metadata.yaml）
 ├── power_service.py             # 接口封装（连接复用 / 退避重试 / 容错解析）
-├── secure_store.py              # 敏感信息加密与脱敏
+├── secure_store.py              # 加载垫片：实现只在插件目录里维护一份，命令行版共用
 ├── config_loader.py             # 配置加载：${ENV} 展开 + enc:v1: 解密
 ├── storage.py                   # 历史电量存储（算掉电速率，房间只存摘要）
 ├── scheduler_job.py             # 多房间查询 + 阈值/掉电速率双预警
 ├── notifier.py                  # 推送渠道：console / 飞书 webhook / AstrBot
 ├── cli.py                       # 命令行入口：probe / room / once / poll / watch
-└── config.example.yaml          # 配置示例（复制成 config.yaml 使用）
+├── config.example.yaml          # 配置示例（复制成 config.yaml 使用）
+└── tests/                       # 离线单元测试（pytest 直接收集）
 ```
 
-开发与测试脚本（`test_*.py`、`check_workspace.py`、`pack_all.py`、`scan_privacy.py`）仅在作者本地维护，不随仓库分发。
+## 测试
+
+仓库自带不联网的单元测试：
+
+```bash
+pip install -r requirements.txt -r requirements-dev.txt
+pytest
+```
+
+覆盖：加密存储 / 历史去明文 / 接口封装契约 / 字段容错 / 预警速率 / 搜校限速熔断 / 插件参数解析 / 插件加载冒烟。其中 `tests/test_plugin_smoke.py` 防的是「插件能 import 但一条命令都没注册」这类问题：`@register` 贴错类时，语法检查和其余测试都是绿的，只有真加载才看得出来。
+
+在线联调脚本（`test_power.py`、`test_v2_logic.py`）与打包、体检、隐私扫描工具（`pack_all.py`、`check_workspace.py`、`scan_privacy.py`）涉及真实账号配置，仅作者本地维护，不随仓库分发。
+
+## 许可证
+
+MIT License，见 [LICENSE](LICENSE)。
 
 ## 数据来源与声明
 
