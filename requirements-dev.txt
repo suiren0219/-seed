@@ -1,0 +1,3 @@
+# 测试/开发额外依赖（运行时依赖见 requirements.txt）
+-r requirements.txt
+pytest>=8.0
