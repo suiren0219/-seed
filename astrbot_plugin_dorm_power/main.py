@@ -307,7 +307,7 @@ class _ScanGuard:
         return True
 
 
-@register("dorm_power", "user", "宿舍电量查询与定时播报（完美校园，多用户自助）", "v2.2.0")
+@register("dorm_power", "suiren0219", "宿舍电量查询与定时播报（完美校园，多用户自助）", "v2.2.0")
 class DormPowerPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig | None = None):
         super().__init__(context)

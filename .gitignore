@@ -31,6 +31,14 @@ pack_all.py
 scan_privacy.py
 CHANGELOG_*.md
 
+# 根目录残留的旧测试副本：正式用例已在 tests/，这几份是本地留档（含真实学校代码），
+# 不加回忽略的话 git add -A 会把它们一起提交上去
+/test_plugin_parsing.py
+/test_plugin_smoke.py
+/test_security_scan.py
+/test_power.py
+/test_v2_logic.py
+
 # Local editor/system files
 .vscode/
 .idea/

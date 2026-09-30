@@ -224,7 +224,7 @@ def test_grouped_config(loaded):
                                 "warn_drop_per_hour": 2.5},
                    "scan": {"scan_qps": 9, "scan_max_hits": 5},
                    "advanced": {"odd_fields": "odd,surplus", "cmd_index": "mycmd"},
-                   "account": "", "customercode": 1000145, "rooms": "",
+                   "account": "", "customercode": 1000000, "rooms": "",
                    "encrypt_key": "", "notify_origin": ""})
     p2 = cls(context=object(), config=nested)
     assert p2._cfg_get("cron_hours") == "7,19"                       # 分组内的值能读到

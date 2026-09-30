@@ -125,7 +125,7 @@ def test_config_and_parse():
         cfg_path = os.path.join(tmp, "config.yaml")
         with open(cfg_path, "w", encoding="utf-8") as f:
             f.write(f'student:\n  account: "{box.encrypt(ACCOUNT)}"\n'
-                    f'  customercode: 1000145\n'
+                    f'  customercode: 1000000\n'
                     f'security:\n  key: "{key}"\n')
         cfg = load_config(cfg_path)
         check("配置里的密文账号被还原", cfg["student"]["account"] == ACCOUNT)

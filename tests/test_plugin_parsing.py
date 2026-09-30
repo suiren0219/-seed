@@ -59,7 +59,7 @@ def test_pick_rooms_keywords():
 def test_parse_rooms_text():
     assert _parse_rooms_text(ROOMS_TEMPLATE) == []             # 模板解析出 0 个房间
     assert _parse_rooms_text("# 注释\n\n甲|rv1\n乙|rv2\n") == [("甲", "rv1"), ("乙", "rv2")]
-    assert _parse_rooms_text("23东 a8 102") == []               # 缺 | 的行跳过
+    assert _parse_rooms_text("1东 a1 101") == []               # 缺 | 的行跳过
     assert _parse_rooms_text("garbage") == []                   # 旧格式兜底行为已改：无|不再硬造房间
 
 
@@ -85,8 +85,8 @@ def test_args_glued_and_separators():
     assert args_of("电量删除 1", "电量删除") == ["1"]
     assert args_of("电量删除1", "电量删除") == ["1"]                       # 粘连
     assert args_of("电量添加1、2", "电量添加") == ["1", "2"]                # 粘连 + 顿号
-    assert args_of("电量绑定1000145 421222", "电量绑定") == ["1000145", "421222"]
-    assert args_of("/电量搜校 421222", "电量搜校") == ["421222"]            # / 前缀
+    assert args_of("电量绑定1000000 440000", "电量绑定") == ["1000000", "440000"]
+    assert args_of("/电量搜校 440000", "电量搜校") == ["440000"]            # / 前缀
     assert args_of("电量删除", "电量删除") == []                            # 无参数
     assert args_of("电量删除，1，2", "电量删除") == ["1", "2"]              # 中文逗号
 

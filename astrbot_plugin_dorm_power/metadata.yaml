@@ -1,6 +1,13 @@
 name: astrbot_plugin_dorm_power
 display_name: 宿舍电量监控
-desc: 完美校园宿舍电量查询与定时播报（多用户自助：绑定学校代码+账号，自动列房间，/电量搜校自动找学校代码）
+short_desc: 完美校园宿舍电量查询与定时播报，多用户各自绑定账号
+desc: 完美校园（智能水电）宿舍电量查询与定时播报。多用户各自 /电量绑定 学校代码+账号，自动列出房间并按序号或房间号关键字增删；每日定时群播报，剩余电量与掉电速率双预警；账号与房间信息加密落盘、日志脱敏；搜校带限速与熔断防风控；接口地址、命令名、字段名都可在面板覆盖。
 version: v2.2.0
-author: user
-repo: ""
+author: suiren0219
+repo: https://github.com/suiren0219/astrbot_plugin_dorm_power
+category: 实用工具
+tags:
+  - 生活
+  - 查询
+  - 定时播报
+  - 电量
