@@ -107,6 +107,15 @@ def _install_astrbot_stub():
         def __init__(self, context=None, config=None):
             self.context = context
 
+    class StarTools:
+        """与真实实现一致：返回绝对路径 data/plugin_data/<plugin_name> 并建好目录。"""
+
+        @staticmethod
+        def get_data_dir(plugin_name):
+            path = pathlib.Path(tempfile.gettempdir()) / "dp_smoke" / "plugin_data" / str(plugin_name)
+            path.mkdir(parents=True, exist_ok=True)
+            return path
+
     def register(name, author, desc, version):
         def deco(cls):
             registered.append((cls, name, author, desc, version))
@@ -114,7 +123,7 @@ def _install_astrbot_stub():
             return cls
         return deco
 
-    star.Star, star.register, star.Context = Star, register, object
+    star.Star, star.register, star.Context, star.StarTools = Star, register, object, StarTools
     _install_stub("astrbot", api=api, **{})
     return registered
 
@@ -143,6 +152,18 @@ def plugin(plugin_cls):
 
 def test_secure_store_shipped_with_plugin():
     assert (PLUGIN_DIR / "secure_store.py").is_file()
+
+
+def test_data_paths_under_plugin_data(loaded):
+    """持久化文件必须在 data/plugin_data/<plugin_name>/ 下，不能落在 data/config/。"""
+    _reg, mod = loaded
+    norm = mod.DATA_DIR.replace("\\", "/")
+    assert norm.endswith("/plugin_data/astrbot_plugin_dorm_power"), mod.DATA_DIR
+    assert norm.split("/plugin_data/")[1] == mod.PLUGIN_NAME, "目录名应与插件名一致"
+    for path in (mod.USER_DATA_PATH, mod.KNOWN_CODES_PATH):
+        assert "plugin_data" in path.replace("\\", "/"), path
+        assert "data/config" not in path.replace("\\", "/"), path
+    assert len({mod.USER_DATA_PATH, mod.KNOWN_CODES_PATH}) == 2
 
 
 def test_register_and_commands(loaded):

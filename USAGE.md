@@ -84,6 +84,7 @@
 - **掉电异常**：相邻两次记录之间每小时掉电 ≥ `warn_drop_per_hour`（默认 5 度/小时）时提醒，可能是大功率电器在跑。
 
 独立运行模式会把每次读数记进 `data/history.json` 用于算速率；AstrBot 插件模式按定时播报的间隔比较两次读数。
+插件模式的持久化数据（用户绑定、学校代码候选池）统一放在 `data/plugin_data/astrbot_plugin_dorm_power/` 下。
 
 ## 配置说明
 
@@ -160,7 +161,7 @@ python cli.py watch    # 常驻轮询，间隔取 config.yaml 的 schedule.inter
 ```bash
 python secure_store.py genkey --write            # 生成 .dorm_power_key（本地私有，勿分发）
 python secure_store.py encrypt-value 你的账号     # 输出 enc:v1:... 粘进 config.yaml
-python secure_store.py encrypt data/config/xxx.json   # 或把整个 JSON 转成密文
+python secure_store.py encrypt data/plugin_data/astrbot_plugin_dorm_power/dorm_power_users.json   # 或把整个 JSON 转成密文
 python secure_store.py decrypt <文件或密文>       # 需要迁移时解密
 python secure_store.py selftest                  # 自检
 ```

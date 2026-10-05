@@ -16,6 +16,9 @@
 安全与稳定性：
 * 用户数据（账号=身份证号、房间信息）整体加密落盘，需配置密钥（encrypt_key 或环境变量
   DORM_POWER_KEY / 密钥文件 .dorm_power_key）；没有密钥时退化成明文并启动告警。
+* 持久化文件统一放在 AstrBot 规定的数据目录 data/plugin_data/<插件名>/（用户数据
+  dorm_power_users.json、学校代码候选池 known_schools.json）；老版本写在插件配置目录
+  data/config/ 下的同名文件，会在首次加载时自动搬过去。
 * 搜校限速 + 熔断：默认 6 并发 / 6 QPS，带随机抖动，连续失败冷却，疑似被限流直接中止；
   同时用「历史命中过的学校代码」候选池优先探测，通常几十个请求就能命中，避免全量扫描。
 * 全插件复用一个 aiohttp session（连接池 + keep-alive）；网络错误 / 429 / 5xx 指数退避重试。
@@ -39,10 +42,88 @@ from astrbot.api import AstrBotConfig, logger
 from astrbot.api.event import MessageChain, filter
 from astrbot.api.star import Context, Star, register
 
-PLUGIN_DIR = os.path.dirname(os.path.abspath(__file__))
-USER_DATA_PATH = os.path.join("data", "config", "astrbot_plugin_dorm_power_users.json")
+PLUGIN_DIR = os.path.dirname(os.path.abspath(__file__))  # .../data/plugins/astrbot_plugin_dorm_power
+PLUGIN_NAME = "astrbot_plugin_dorm_power"  # 与 metadata.yaml 的 name 必须一致
+# 未取到 AstrBot 数据目录时的最终兜底（仅用于源码 checkout 里直接跑，正常安装不会走到）
+_FALLBACK_DATA_DIR = os.path.join("data", "plugin_data", PLUGIN_NAME)
+
+# 持久化文件名（都放在 data/plugin_data/<plugin_name>/ 下）
+USER_DATA_FILE = "dorm_power_users.json"
+KNOWN_CODES_FILE = "known_schools.json"
+# 老版本用的文件名（写在插件配置目录里，迁移时只读）
+_LEGACY_USER_FILE = "astrbot_plugin_dorm_power_users.json"
+_LEGACY_CODES_FILE = "dorm_power_known_schools.json"
+
+
+def _resolve_data_dir() -> str:
+    """插件持久化目录：AstrBot 规定的 data/plugin_data/<plugin_name>/。
+
+    优先用平台接口 StarTools.get_data_dir(plugin_name)（AstrBot 4.9+ 的官方写法，
+    返回绝对路径，如 .../data/plugin_data/astrbot_plugin_dorm_power）。取不到时
+    按「插件目录/../../plugin_data/<name>」推算——插件装在 <root>/data/plugins/<name>，
+    上溯两级就是 <root>；再不行才退化成相对路径。
+    """
+    try:
+        from astrbot.core.utils.astrbot_path import get_astrbot_plugin_data_path
+        if get_astrbot_plugin_data_path:
+            return os.path.join(str(get_astrbot_plugin_data_path()), PLUGIN_NAME)
+    except Exception:
+        pass
+    try:
+        from astrbot.api.star import StarTools
+        getter = getattr(StarTools, "get_data_dir", None)
+        if callable(getter):
+            return str(getter(PLUGIN_NAME))
+    except Exception:
+        pass
+    try:
+        root = os.path.abspath(os.path.join(PLUGIN_DIR, os.pardir, os.pardir))
+        if os.path.isdir(root):
+            return os.path.join(root, "plugin_data", PLUGIN_NAME)
+    except Exception:
+        pass
+    return os.path.abspath(_FALLBACK_DATA_DIR)
+
+
+DATA_DIR = _resolve_data_dir()
+USER_DATA_PATH = os.path.join(DATA_DIR, USER_DATA_FILE)
 # 命中过的学校代码候选池（只存数字代码，不含任何账号信息）
-KNOWN_CODES_PATH = os.path.join("data", "config", "dorm_power_known_schools.json")
+KNOWN_CODES_PATH = os.path.join(DATA_DIR, KNOWN_CODES_FILE)
+
+
+def _legacy_path(filename: str) -> str | None:
+    """老版本把数据写在 <root>/data/config/ 下（插件配置目录，已被平台明令禁止）。
+
+    插件目录本身就在 <root>/data/plugins/<name>，上溯两级就是 <root>；找不到这样的
+    布局（比如源码 checkout 里直接跑）时再看当前工作目录，都没有就返回 None。
+    只在迁移时用，正常读写一律走 DATA_DIR。
+    """
+    candidates = [os.path.join(PLUGIN_DIR, os.pardir, os.pardir, "config", filename)]
+    candidates += [os.path.join("data", "config", filename)]
+    for path in candidates:
+        if os.path.isfile(path):
+            return path
+    return None
+
+
+def _migrate_legacy_data() -> None:
+    """把老版本写在 data/config/ 下的用户数据搬到 plugin_data/（只搬一次）。
+
+    只在目标不存在、且源文件确实在时搬；绝不覆盖新目录里已有的数据。
+    """
+    pairs = ((_LEGACY_USER_FILE, USER_DATA_PATH), (_LEGACY_CODES_FILE, KNOWN_CODES_PATH))
+    for filename, new in pairs:
+        if os.path.exists(new):
+            continue
+        old = _legacy_path(filename)
+        if not old:
+            continue
+        try:
+            os.makedirs(os.path.dirname(new) or ".", exist_ok=True)
+            os.replace(old, new)
+            logger.info("[dorm_power] 已把旧数据目录里的 %s 迁移到 %s", filename, new)
+        except OSError as e:
+            logger.warning("[dorm_power] 旧数据迁移失败(%s)：%s", filename, e)
 
 
 def _load_side_module(mod_name: str, filename: str):
@@ -187,11 +268,6 @@ class _ApiResultError(RuntimeError):
     """接口通了但 result_ != true：属于业务结果，不该当成网络失败去重试/熔断。"""
 
 
-def _known_codes_path() -> str:
-    """已知命中过的学校代码候选池（只存数字代码，不含任何个人信息）。"""
-    return KNOWN_CODES_PATH
-
-
 class _Http:
     """插件级复用的 aiohttp 会话（连接池 + keep-alive）。
 
@@ -307,7 +383,7 @@ class _ScanGuard:
         return True
 
 
-@register("dorm_power", "suiren0219", "宿舍电量查询与定时播报（完美校园，多用户自助）", "v2.2.0")
+@register("dorm_power", "suiren0219", "宿舍电量查询与定时播报（完美校园，多用户自助）", "v2.2.1")
 class DormPowerPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig | None = None):
         super().__init__(context)
@@ -318,6 +394,7 @@ class DormPowerPlugin(Star):
         self._scan_running = False        # 同一时间只允许一个搜校任务
         self._scan_last = {}              # 账号摘要 -> 上次扫描时间戳（冷却用）
         self._box = new_box(self._cfg_get("encrypt_key") if self.config is not None else None)
+        _migrate_legacy_data()  # 必须在读用户数据之前：老文件搬到新目录后才读得到
         self._load_users()
 
     def _cfg_get(self, key: str, default=None):
@@ -950,7 +1027,7 @@ class DormPowerPlugin(Star):
     def _known_codes(self) -> list[int]:
         """历史命中过的学校代码（候选池，只存数字，不含个人信息）。"""
         try:
-            with open(_known_codes_path(), "r", encoding="utf-8") as f:
+            with open(KNOWN_CODES_PATH, "r", encoding="utf-8") as f:
                 data = json.load(f)
             return sorted(int(c) for c in (data or {}).get("codes", []) if str(c).isdigit())
         except (FileNotFoundError, json.JSONDecodeError, OSError):
@@ -960,7 +1037,7 @@ class DormPowerPlugin(Star):
         """把命中代码写回候选池：下次搜校先试这些，通常几十个请求就能命中。"""
         if not codes:
             return
-        path = _known_codes_path()
+        path = KNOWN_CODES_PATH
         try:
             merged = sorted(set(self._known_codes()) | {int(c) for c in codes})
             os.makedirs(os.path.dirname(path) or ".", exist_ok=True)

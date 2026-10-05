@@ -41,7 +41,9 @@
 
 **🛠 接口兜底**：`api_url` / `api_command` / `odd_fields` / `cmd_bind` / `cmd_index` / `cmd_login`，上游改地址、改 command、改字段名时在这里覆盖，不必改代码
 
-普通用户无需管理员配置，直接 `/电量绑定` 自己的账号即可；个人信息只存在服务器本地 `data/config/astrbot_plugin_dorm_power_users.json`。
+普通用户无需管理员配置，直接 `/电量绑定` 自己的账号即可；个人信息只存在服务器本地的插件数据目录
+`data/plugin_data/astrbot_plugin_dorm_power/dorm_power_users.json`（老版本写在 `data/config/` 下的文件会在
+首次加载时自动迁移过去）。
 
 ## 安全与防风控
 
@@ -53,6 +55,8 @@
   连续失败会自动冷却，多次熔断直接中止并提示；同时维护「历史命中过的学校代码」候选池，多数情况下几十个请求就能命中。
 - **连接复用与退避重试**：全插件复用一个 aiohttp session（连接池 + keep-alive），
   网络错误 / 429 / 5xx 按指数退避重试；接口返回失败（`result_ != true`）不重试也不计入熔断——那是业务结果，不是网络故障。
+- **数据存放在规定目录**：用户数据与学校代码候选池都在 `data/plugin_data/astrbot_plugin_dorm_power/` 下，
+  不写 `data/config/`（插件配置目录）；老版本留下的文件会在首次加载时自动迁移，不会覆盖已有数据。
 - **响应容错**：`body` 是 JSON 字符串或对象、电量字段改名、首个模块不含电量时都能照常解析，并在识别不出结构时给出干净的错误原因。
 
 ## 数据来源
