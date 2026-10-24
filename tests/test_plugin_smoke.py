@@ -204,9 +204,11 @@ def test_format_room_candidates(plugin_cls):
 
 
 def test_format_room_card_layout(plugin_cls):
-    """多行卡片式：一行一个信息层，近7日报总数+日均，不再拼逐日长串。"""
+    """多行卡片式：一行一个信息层，近7日有汇总行 + 逐日明细行。"""
     detail = {"roomfullname": "23栋A8-1020", "odd": "213.4", "todayuse": "7",
-              "weekuselist": [{"weekday": f"星期{i}", "dayuse": str(10 + i)} for i in range(7)],
+              "weekuselist": [{"weekday": w, "dayuse": str(10 + i)}
+                              for i, w in enumerate(("星期日", "星期一", "星期二", "星期三",
+                                                     "星期四", "星期五", "星期六"))],
               "sumbuy": "2139.4", "collecdate": "10-20"}
     formatted, odd = plugin_cls._format_room(detail, "23栋A8-1020", ("odd",))
     lines = formatted.splitlines()
@@ -215,10 +217,11 @@ def test_format_room_card_layout(plugin_cls):
     assert lines[1] == "⚡ 剩余 213.4 度 ｜ 今日 7 度"
     # 10+..+16 = 91，日均 13.0
     assert lines[2] == "📊 近7日 共91度 · 日均13.0"
-    assert lines[3] == "💳 累购 2139.4 度 ｜ 🗓 抄表 10-20"
-    # 容错：逐日数字解析不出时整行省略，不出乱码
+    assert lines[3] == "📅 日10 一11 二12 三13 四14 五15 六16"
+    assert lines[4] == "💳 累购 2139.4 度 ｜ 🗓 抄表 10-20"
+    # 容错：逐日数字解析不出时整块省略，不出乱码
     bad, _odd = plugin_cls._format_room({"odd": 1, "weekuselist": [{"dayuse": "x"}]}, "r", ("odd",))
-    assert "近7日" not in bad and "x" not in bad
+    assert "近7日" not in bad and "x" not in bad and "📅" not in bad
 
 
 def test_format_room_drops_month_usage(plugin_cls):
@@ -228,7 +231,7 @@ def test_format_room_drops_month_usage(plugin_cls):
               "monthuselist": [{"monthuse": "41"}], "sumbuy": "99.9"}
     formatted, _odd = plugin_cls._format_room(detail, "X-101", ("odd",))
     assert "上月" not in formatted and "41" not in formatted, formatted
-    for keep in ("剩余 12.3 度", "今日 4 度", "近7日", "累购 99.9 度"):
+    for keep in ("剩余 12.3 度", "今日 4 度", "近7日", "📅", "累购 99.9 度"):
         assert keep in formatted, formatted
 
 

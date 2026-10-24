@@ -383,7 +383,7 @@ class _ScanGuard:
         return True
 
 
-@register("dorm_power", "suiren0219", "宿舍电量查询与定时播报（完美校园，多用户自助）", "v2.2.2")
+@register("dorm_power", "suiren0219", "宿舍电量查询与定时播报（完美校园，多用户自助）", "v2.2.3")
 class DormPowerPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig | None = None):
         super().__init__(context)
@@ -641,11 +641,11 @@ class DormPowerPlugin(Star):
             🏠 房间名
             ⚡ 剩余 213.4 度 ｜ 今日 7 度
             📊 近7日 共152度 · 日均21.7
+            📅 日28 一22 二27 三25 四19 五24 六7
             💳 累购 2139.4 度 ｜ 🗓 抄表 10-20
 
         每行都以 emoji/分隔符开头、每张卡片以 🏠 开头：就算被平台或分段插件把
-        多行压成一段，各房间和各字段仍然读得出来。近7日只报总数和日均——
-        逐日数字排一长串在群里很难扫，谁真想看明细去小程序看。
+        多行压成一段，各房间和各字段仍然读得出来。
         monthuselist 不展示：条目粒度没有可靠依据（按天还是按月无公开文档），
         实测取出来和近7日对不上，标成"上月"只会让人看不懂。
 
@@ -689,15 +689,17 @@ class DormPowerPlugin(Star):
         lines.append(head)
 
         week = [d for d in (mod.get("weekuselist") or []) if isinstance(d, dict)]
-        days = []
+        days = []  # (星期缩写, 当日用量)，数字解析不出的条目跳过
         for d in week:
             try:
-                days.append(float(d.get("dayuse", d.get("use"))))
+                days.append((str(d.get("weekday", "")).replace("星期", ""),
+                             float(d.get("dayuse", d.get("use")))))
             except (TypeError, ValueError):
                 continue
         if days:
-            total = sum(days)
+            total = sum(v for _w, v in days)
             lines.append(f"📊 近7日 共{cls._fmt_num(total)}度 · 日均{total / len(days):.1f}")
+            lines.append("📅 " + " ".join(f"{w}{cls._fmt_num(v)}" for w, v in days))
 
         tail = []
         if mod.get("sumbuy") is not None:
