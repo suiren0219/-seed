@@ -14,11 +14,12 @@
 兼容写法：指令可带 / 前缀；参数可与指令名粘连（如 电量删除1、电量绑定1000000 123...）。
 
 安全与稳定性：
-* 用户数据（账号=身份证号、房间信息）整体加密落盘，需配置密钥（encrypt_key 或环境变量
-  DORM_POWER_KEY / 密钥文件 .dorm_power_key）；没有密钥时退化成明文并启动告警。
+* 用户数据（账号=身份证号、房间信息）整体加密落盘：默认自动生成密钥存到插件数据目录
+  （.dorm_power_key），零配置即加密；也可用 encrypt_key 配置或环境变量 DORM_POWER_KEY 指定。
 * 持久化文件统一放在 AstrBot 规定的数据目录 data/plugin_data/<插件名>/（用户数据
   dorm_power_users.json、学校代码候选池 known_schools.json）；老版本写在插件配置目录
   data/config/ 下的同名文件，会在首次加载时自动搬过去。
+* 每日播报自带两类预警：低电量提醒充值 + 掉电速率异常（按上次播报读数算度/小时）。
 * 搜校限速 + 熔断：默认 6 并发 / 6 QPS，带随机抖动，连续失败冷却，疑似被限流直接中止；
   同时用「历史命中过的学校代码」候选池优先探测，通常几十个请求就能命中，避免全量扫描。
 * 全插件复用一个 aiohttp session（连接池 + keep-alive）；网络错误 / 429 / 5xx 指数退避重试。
@@ -32,7 +33,7 @@ import random
 import re
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import aiohttp
 import yaml
@@ -50,6 +51,8 @@ _FALLBACK_DATA_DIR = os.path.join("data", "plugin_data", PLUGIN_NAME)
 # 持久化文件名（都放在 data/plugin_data/<plugin_name>/ 下）
 USER_DATA_FILE = "dorm_power_users.json"
 KNOWN_CODES_FILE = "known_schools.json"
+# 上次播报读数（掉电速率预警用）：只存房间 HMAC 摘要 + 电量 + 时间，不含明文凭证
+LAST_READINGS_FILE = "last_readings.json"
 # 老版本用的文件名（写在插件配置目录里，迁移时只读）
 _LEGACY_USER_FILE = "astrbot_plugin_dorm_power_users.json"
 _LEGACY_CODES_FILE = "dorm_power_known_schools.json"
@@ -89,6 +92,7 @@ DATA_DIR = _resolve_data_dir()
 USER_DATA_PATH = os.path.join(DATA_DIR, USER_DATA_FILE)
 # 命中过的学校代码候选池（只存数字代码，不含任何账号信息）
 KNOWN_CODES_PATH = os.path.join(DATA_DIR, KNOWN_CODES_FILE)
+LAST_READINGS_PATH = os.path.join(DATA_DIR, LAST_READINGS_FILE)
 
 
 def _legacy_path(filename: str) -> str | None:
@@ -160,10 +164,32 @@ class _DummyBox:
 
 
 def new_box(key: str | None = None):
-    """按 配置 > 环境变量 DORM_POWER_KEY > 密钥文件 取 SecretBox。"""
+    """按 配置 > 环境变量 DORM_POWER_KEY > 密钥文件 取 SecretBox。
+
+    一样都没有时自动生成一把随机密钥存进插件数据目录（.dorm_power_key）：
+    「加密落盘」应该是零配置的默认行为，而不是要用户手动开启的选项。
+    """
     if not secure_store:
         return _DummyBox()
-    return secure_store.box_from_env(key, PLUGIN_DIR, os.getcwd())
+    box = secure_store.box_from_env(key, DATA_DIR, PLUGIN_DIR, os.getcwd())
+    if box.available:
+        return box
+    keyfile = os.path.join(DATA_DIR, ".dorm_power_key")
+    try:
+        new_key = secure_store.generate_key()
+        os.makedirs(DATA_DIR, exist_ok=True)
+        with open(keyfile, "w", encoding="utf-8") as f:
+            f.write(new_key)
+        try:
+            os.chmod(keyfile, 0o600)
+        except OSError:
+            pass
+        logger.info("[dorm_power] 未配置密钥，已自动生成一把存到 %s（删除该文件重启即可重新生成）",
+                    keyfile)
+        return secure_store.SecretBox(new_key)
+    except OSError as e:
+        logger.warning("[dorm_power] 自动生成密钥失败(%s)，本次退化为明文存储", e)
+        return _DummyBox()
 
 
 def mask_id(value) -> str:
@@ -258,6 +284,23 @@ def pick_rooms(args: list[str], rooms: list[tuple[str, str]]) -> tuple[list[tupl
         final = idx
     picks = [rooms[i] for i in sorted(final)]
     return picks, [], kw is not None and not idx and len(picks) > 1
+
+
+def _should_warn(prev_odd, cur_odd, threshold, drop_per_hour,
+                 hours_between: float | None = None) -> str | None:
+    """预警判定（与独立模式 scheduler_job.should_warn 同逻辑），返回不带 ⚠️ 的文案。
+
+    低电量优先；掉电异常按每小时速率算，间隔未知时退回按单次差值判断（保守）。
+    """
+    if cur_odd <= threshold:
+        return f"剩余 {cur_odd:g} 度，低于 {threshold:g} 度，请及时充值！"
+    if prev_odd is not None:
+        diff = prev_odd - cur_odd
+        rate = diff / hours_between if hours_between and hours_between > 0 else diff
+        if rate >= drop_per_hour:
+            span = f"（{hours_between:.1f} 小时掉 {diff:.1f} 度）" if hours_between else f"（降 {diff:.1f} 度）"
+            return f"掉电异常：{prev_odd:g} → {cur_odd:g} 度{span}"
+    return None
 
 
 class _ApiStatusError(RuntimeError):
@@ -383,7 +426,7 @@ class _ScanGuard:
         return True
 
 
-@register("dorm_power", "suiren0219", "宿舍电量查询与定时播报（完美校园，多用户自助）", "v2.2.3")
+@register("dorm_power", "suiren0219", "宿舍电量查询与定时播报（完美校园，多用户自助）", "v2.2.4")
 class DormPowerPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig | None = None):
         super().__init__(context)
@@ -514,6 +557,44 @@ class DormPowerPlugin(Star):
         except (FileNotFoundError, ValueError, TypeError):
             return 20.0
 
+    def _drop_threshold(self) -> float:
+        """掉电速率预警阈值（度/小时）：面板 schedule.warn_drop_per_hour。"""
+        val = self._cfg_get("warn_drop_per_hour", _MISSING)
+        if val is not _MISSING and val not in ("", None):
+            try:
+                return float(val)
+            except (TypeError, ValueError):
+                pass
+        return 5.0
+
+    def _room_tag(self, roomverify: str) -> str | None:
+        """房间在本地读数历史里的主键：HMAC 摘要，不落明文 roomverify。
+
+        没有可用密钥时返回 None——宁可没有掉电预警，也不能把房间凭证明文写盘。
+        """
+        if not (secure_store and self._box.available):
+            return None
+        return secure_store.room_key(self._box.key, roomverify)
+
+    def _load_readings(self) -> dict:
+        """上次播报读数：{房间摘要: {"odd": 度, "time": iso}}；文件坏了当没有历史。"""
+        try:
+            with open(LAST_READINGS_PATH, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            return data if isinstance(data, dict) else {}
+        except (FileNotFoundError, json.JSONDecodeError, OSError):
+            return {}
+
+    def _save_readings(self, readings: dict) -> None:
+        try:
+            os.makedirs(os.path.dirname(LAST_READINGS_PATH) or ".", exist_ok=True)
+            tmp = LAST_READINGS_PATH + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(readings, f, ensure_ascii=False)
+            os.replace(tmp, LAST_READINGS_PATH)
+        except OSError as e:
+            logger.warning("[dorm_power] 上次读数保存失败: %s", e)
+
     def _cfg_set(self, key: str, value) -> bool:
         """写回配置：分组式 schema 写到已有的分组里，平铺配置写到顶层。"""
         try:
@@ -571,8 +652,7 @@ class DormPowerPlugin(Star):
         if self._box.available:
             logger.info("[dorm_power] 用户数据加密存储已启用（后端 %s）", self._box.backend_name)
         else:
-            logger.warning("[dorm_power] 未配置密钥，用户数据将明文存储；"
-                           "设置环境变量 DORM_POWER_KEY 或插件配置 encrypt_key 可加密（推荐装 cryptography）")
+            logger.warning("[dorm_power] 加密不可用（secure_store 缺失或密钥写入失败），用户数据将明文存储")
         logger.info("[dorm_power] 插件已加载(v2.2 多用户)，定时播报小时: %s，已注册用户: %d",
                     hours, len(self._users))
 
@@ -1225,6 +1305,11 @@ class DormPowerPlugin(Star):
                 seen.add(key)
                 jobs.append((g["origin"], g.get("customercode"), g.get("account"), rooms))
         th = self._threshold()
+        drop_th = self._drop_threshold()
+        # 读数历史只在播报时记录/比较（USAGE 里写明的契约）：手动 /电量 频次不可控，
+        # 拿它算速率会出「两分钟掉 1 度 = 30 度/小时」这种误报。
+        readings = self._load_readings() if self._box.available else None
+        now = datetime.now()
         for origin, code, account, rooms in jobs:
             try:
                 blocks, warns = [], []
@@ -1232,8 +1317,25 @@ class DormPowerPlugin(Star):
                     try:
                         text, odd = await self._query_room(code, account, rv, name)
                         blocks.append(text)
-                        if odd <= th:
-                            warns.append(f"⚠️ {name} 剩余 {odd:g} 度，低于 {th:g} 度，请及时充值！")
+                        tag = self._room_tag(rv) if readings is not None else None
+                        prev = readings.get(tag) if tag else None
+                        hours = None
+                        if prev and prev.get("time"):
+                            try:
+                                hours = (now - datetime.fromisoformat(prev["time"])).total_seconds() / 3600
+                            except (ValueError, TypeError):
+                                hours = None
+                        if prev is not None and (hours is None or hours >= 0.5):
+                            # 间隔太近（如同一次播报里两个账号绑了同一间房）不算速率，防误报
+                            msg = _should_warn(prev.get("odd"), odd, th, drop_th, hours)
+                        elif odd <= th:
+                            msg = f"剩余 {odd:g} 度，低于 {th:g} 度，请及时充值！"
+                        else:
+                            msg = None
+                        if msg:
+                            warns.append(f"⚠️ {name} {msg}")
+                        if tag:
+                            readings[tag] = {"odd": odd, "time": now.isoformat(timespec="seconds")}
                     except Exception as e:
                         blocks.append(f"❌ {name}: {e}")
                 result = "\n\n".join(blocks)
@@ -1242,3 +1344,9 @@ class DormPowerPlugin(Star):
                 await self._send(origin, result)
             except Exception as e:
                 logger.error(f"[dorm_power] 定时播报失败: {e}")
+        if readings is not None:
+            # 只留最近 90 天动过的条目，换房/解绑后的旧摘要不会无限堆积
+            cutoff = (now - timedelta(days=90)).isoformat(timespec="seconds")
+            readings = {k: v for k, v in readings.items()
+                        if isinstance(v, dict) and str(v.get("time", "")) >= cutoff}
+            self._save_readings(readings)

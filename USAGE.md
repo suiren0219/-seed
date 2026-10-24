@@ -156,7 +156,7 @@ python cli.py watch    # 常驻轮询，间隔取 config.yaml 的 schedule.inter
 
 ## 加密与密钥
 
-推荐一开始就配密钥，别让身份证号明文躺在磁盘上。
+推荐一开始就配密钥，别让身份证号明文躺在磁盘上；不配也没关系——首次启动会自动生成一把，加密默认开启。
 
 ```bash
 python secure_store.py genkey --write            # 生成 .dorm_power_key（本地私有，勿分发）
@@ -166,7 +166,7 @@ python secure_store.py decrypt <文件或密文>       # 需要迁移时解密
 python secure_store.py selftest                  # 自检
 ```
 
-- 密钥来源优先级：`encrypt_key` 配置 > 环境变量 `DORM_POWER_KEY` > 仓库根 `.dorm_power_key`。
+- 密钥来源优先级：`encrypt_key` 配置 > 环境变量 `DORM_POWER_KEY` > 密钥文件（插件数据目录 `.dorm_power_key` 优先于仓库根）；都没有时首次启动自动生成一把存到插件数据目录。
 - `config.yaml` 里的敏感值建议写成 `enc:v1:` 密文，或用 `account_env: DORM_POWER_ACCOUNT` 从环境变量取，不要明文落盘。
 - 装了 `cryptography` 用 Fernet(AES)；没装则回退到内置 PBKDF2 方案（零依赖，强度较低，建议装上）。
 - 换密钥后旧数据读不出来，换之前先用 `decrypt` 导出。

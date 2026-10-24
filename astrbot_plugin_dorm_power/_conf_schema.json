@@ -37,7 +37,8 @@
     "type": "string",
     "default": "",
     "obvious_hint": true,
-    "hint": "留空则读环境变量 DORM_POWER_KEY 或仓库根 .dorm_power_key。配了密钥后用户账号与房间信息加密落盘，没配则明文存储并在启动日志告警。换密钥后旧数据读不出来，先用 secure_store.py decrypt 导出"
+    "secret": true,
+    "hint": "留空则自动生成一把密钥存到插件数据目录（加密默认开启）。也可填自定义密钥或环境变量 DORM_POWER_KEY 的值。换密钥后旧数据读不出来，先用 secure_store.py decrypt 导出"
   },
   "schedule": {
     "type": "object",

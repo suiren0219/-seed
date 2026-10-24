@@ -20,7 +20,8 @@ import types
 import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-PLUGIN_DIR = ROOT / "astrbot_plugin_dorm_power"
+# 布局自适应：发布仓插件文件在仓库根，工作区在 astrbot_plugin_dorm_power/ 子目录
+PLUGIN_DIR = ROOT if (ROOT / "main.py").is_file() else ROOT / "astrbot_plugin_dorm_power"
 MAIN_PY = PLUGIN_DIR / "main.py"
 
 registered = []
@@ -252,21 +253,55 @@ def test_box_backend_consistency(plugin):
         assert box.decrypt(box.encrypt("abc")) == "abc"
 
 
-def test_no_key_degrades_to_plaintext(loaded):
+def test_auto_key_generated_and_reused(loaded):
+    """无任何密钥来源时应自动生成并落盘，下次直接复用；显式传参优先。
+
+    cwd 切到空目录：工作区根目录放着自己的 .dorm_power_key，会被密钥文件查找命中，
+    那是插件该有的行为，但会盖住「自动生成」分支，测试里要避开。
+    """
     _reg, mod = loaded
-    tmp = tempfile.mkdtemp()
-    old_cwd = os.getcwd()
-    old_env = os.environ.pop("DORM_POWER_KEY", None)
+    keyfile = os.path.join(mod.DATA_DIR, ".dorm_power_key")
+    old_cwd, old_env = os.getcwd(), os.environ.pop("DORM_POWER_KEY", None)
     try:
-        os.chdir(tmp)
-        nokey = mod.new_box(None)
-        assert nokey.backend_name == "none", "无密钥时必须退化为不加密"
-        assert nokey.encrypt("x") == "x" and nokey.decrypt("x") == "x"
+        os.chdir(tempfile.mkdtemp())
+        if os.path.isfile(keyfile):
+            os.remove(keyfile)                       # 从零开始，验证自动生成
+        box1 = mod.new_box(None)
+        assert box1.available and box1.key, "无密钥来源时应自动生成，而不是退化为明文"
+        assert os.path.isfile(keyfile), "自动生成的密钥必须落盘，否则重启后旧数据解不开"
+        box2 = mod.new_box(None)
+        assert box2.key == box1.key, "重启后必须复用同一把密钥"
+        assert box2.decrypt(box1.encrypt("abc")) == "abc"
+        assert mod.new_box("explicit").key == "explicit", "显式传入的密钥优先"
     finally:
         os.chdir(old_cwd)
         if old_env is not None:
             os.environ["DORM_POWER_KEY"] = old_env
-        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_should_warn_matches_standalone(loaded):
+    """预警判定应与独立模式 scheduler_job.should_warn 同语义。"""
+    _reg, mod = loaded
+    f = mod._should_warn
+    assert f(50.0, 40.0, 20, 5, 10.0) is None, "1 度/小时的正常消耗不算异常"
+    assert "掉电异常" in f(50.0, 40.0, 20, 5, 1.0), "10 度/小时要报掉电异常"
+    assert "充值" in f(None, 8.0, 20, 5), "低于阈值报充值提醒"
+    assert f(50.0, 40.0, 20, 5, None), "间隔未知时退回按差值保守报"
+    assert f(50.0, 48.0, 20, 5, 1.0) is None, "电量上升（充值到账）不报掉电"
+
+
+def test_readings_store_roundtrip(plugin, loaded):
+    """上次读数持久化往返；房间主键必须是摘要，不能落明文 roomverify。"""
+    _reg, mod = loaded
+    try:
+        plugin._save_readings({"rk_x": {"odd": 1.5, "time": "2026-10-24T08:00:00"}})
+        assert plugin._load_readings()["rk_x"]["odd"] == 1.5
+        tag = plugin._room_tag("101-1--11-101")
+        assert tag and tag != "101-1--11-101", "读数主键必须是摘要"
+        assert tag == plugin._room_tag("101-1--11-101"), "同一房间的摘要必须稳定"
+    finally:
+        if os.path.exists(mod.LAST_READINGS_PATH):
+            os.remove(mod.LAST_READINGS_PATH)
 
 
 def test_cfg_defaults_tolerance(plugin):

@@ -10,7 +10,9 @@ import pathlib
 import re
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-SRC = (ROOT / "astrbot_plugin_dorm_power" / "main.py").read_text(encoding="utf-8")
+# 布局自适应：发布仓插件文件在仓库根，工作区在 astrbot_plugin_dorm_power/ 子目录
+_PLUGIN_DIR = ROOT if (ROOT / "main.py").is_file() else ROOT / "astrbot_plugin_dorm_power"
+SRC = (_PLUGIN_DIR / "main.py").read_text(encoding="utf-8")
 START = SRC.index("API_URL =")
 END = SRC.index("class _ApiStatusError")
 ns = {"re": re}

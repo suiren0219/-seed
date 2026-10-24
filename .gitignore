@@ -21,9 +21,6 @@ __pycache__/
 # 隐私扫描模式：含本人身份证/学号/房号等具体值，绝不入库
 private_patterns.txt
 
-# Nested duplicate checkout retained locally
-astrbot_plugin_dorm_power/astrbot_plugin_dorm_power/
-
 # 本地开发工具（打包/工作区检查/隐私扫描）只在本地维护，不随仓库分发；
 # 单元测试已回归仓库 tests/ 目录，不再忽略
 check_workspace.py
