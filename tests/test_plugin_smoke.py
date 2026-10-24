@@ -197,10 +197,49 @@ def test_format_room_candidates(plugin_cls):
     formatted, odd = plugin_cls._format_room(
         {"modlist": [{"label": "other"}, {"surplus": "18.5"}],
          "roomfullname": "测试房间"}, "备用房间", ("surplus",))
-    assert odd == 18.5 and "剩余18.5度" in formatted    # 非首个模块 + 候选字段
+    assert odd == 18.5 and "剩余 18.5 度" in formatted    # 非首个模块 + 候选字段
     formatted, odd = plugin_cls._format_room(
         {"balance": "7.25", "roomfullname": "顶层房间"}, "备用房间", ("balance",))
-    assert odd == 7.25 and "剩余7.25度" in formatted    # 顶层候选字段
+    assert odd == 7.25 and "剩余 7.25 度" in formatted    # 顶层候选字段
+
+
+def test_format_room_card_layout(plugin_cls):
+    """多行卡片式：一行一个信息层，近7日报总数+日均，不再拼逐日长串。"""
+    detail = {"roomfullname": "23栋A8-1020", "odd": "213.4", "todayuse": "7",
+              "weekuselist": [{"weekday": f"星期{i}", "dayuse": str(10 + i)} for i in range(7)],
+              "sumbuy": "2139.4", "collecdate": "10-20"}
+    formatted, odd = plugin_cls._format_room(detail, "23栋A8-1020", ("odd",))
+    lines = formatted.splitlines()
+    assert odd == 213.4
+    assert lines[0] == "🏠 23栋A8-1020"
+    assert lines[1] == "⚡ 剩余 213.4 度 ｜ 今日 7 度"
+    # 10+..+16 = 91，日均 13.0
+    assert lines[2] == "📊 近7日 共91度 · 日均13.0"
+    assert lines[3] == "💳 累购 2139.4 度 ｜ 🗓 抄表 10-20"
+    # 容错：逐日数字解析不出时整行省略，不出乱码
+    bad, _odd = plugin_cls._format_room({"odd": 1, "weekuselist": [{"dayuse": "x"}]}, "r", ("odd",))
+    assert "近7日" not in bad and "x" not in bad
+
+
+def test_format_room_drops_month_usage(plugin_cls):
+    """monthuselist 语义无可靠依据（实测与近7日对不上），不得再拼进播报。"""
+    detail = {"roomfullname": "X-101", "odd": "12.3", "todayuse": "4",
+              "weekuselist": [{"weekday": "星期一", "dayuse": "5"}],
+              "monthuselist": [{"monthuse": "41"}], "sumbuy": "99.9"}
+    formatted, _odd = plugin_cls._format_room(detail, "X-101", ("odd",))
+    assert "上月" not in formatted and "41" not in formatted, formatted
+    for keep in ("剩余 12.3 度", "今日 4 度", "近7日", "累购 99.9 度"):
+        assert keep in formatted, formatted
+
+
+def test_rooms_config_not_monaco_editor():
+    """rooms 配置不用面板的 Monaco 编辑器：它固定白底主题、不随面板明暗切换，太突兀。"""
+    import json
+    schema = json.loads((PLUGIN_DIR / "_conf_schema.json").read_text(encoding="utf-8"))
+    rooms = schema["rooms"]
+    assert rooms["type"] == "text"
+    assert not rooms.get("editor_mode"), "rooms 不应启用 Monaco 编辑器"
+    assert "editor_theme" not in rooms and "editor_language" not in rooms
 
 
 def test_box_backend_consistency(plugin):

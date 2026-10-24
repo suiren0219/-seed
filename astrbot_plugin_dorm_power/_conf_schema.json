@@ -16,9 +16,6 @@
     "type": "text",
     "default": "# 一行一个房间，格式：房间名 | roomverify\n#\n# 例：\n#   1栋A-102  | 101-1--12-102\n#   1栋A-103  | 101-1--12-103\n#\n# roomverify 从哪来：绑定账号后发 /电量房间 即可看到\n# 说明行以 # 开头会被忽略，空行也会忽略\n\n",
     "hint": "仅未绑定用户的兜底，普通用户直接发 /电量绑定 即可，不必填这里",
-    "editor_mode": true,
-    "editor_language": "yaml",
-    "editor_theme": "vs-light",
     "full_width": true,
     "condition": "account"
   },

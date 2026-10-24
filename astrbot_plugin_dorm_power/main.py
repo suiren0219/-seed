@@ -383,7 +383,7 @@ class _ScanGuard:
         return True
 
 
-@register("dorm_power", "suiren0219", "宿舍电量查询与定时播报（完美校园，多用户自助）", "v2.2.1")
+@register("dorm_power", "suiren0219", "宿舍电量查询与定时播报（完美校园，多用户自助）", "v2.2.2")
 class DormPowerPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig | None = None):
         super().__init__(context)
@@ -635,11 +635,21 @@ class DormPowerPlugin(Star):
     @classmethod
     def _format_room(cls, detail: dict, name: str,
                      odd_fields: tuple[str, ...] = ("odd",)) -> tuple[str, float]:
-        """把 h5_getstuindexpage 的 JSON 解析成一行一个房间的紧凑文本。
+        """把 h5_getstuindexpage 的 JSON 解析成一个房间的多行卡片。
 
-        单行格式（用全角｜分隔）是为了抗平台/分段插件吞换行——即使被压成一段，
-        每个房间仍以 🏠 房间名 开头，能读。返回 (文本, 剩余电量)；
-        解析不出电量时抛 ValueError（带干净原因，不甩原始 JSON）。
+        格式（没有的字段整行省略）：
+            🏠 房间名
+            ⚡ 剩余 213.4 度 ｜ 今日 7 度
+            📊 近7日 共152度 · 日均21.7
+            💳 累购 2139.4 度 ｜ 🗓 抄表 10-20
+
+        每行都以 emoji/分隔符开头、每张卡片以 🏠 开头：就算被平台或分段插件把
+        多行压成一段，各房间和各字段仍然读得出来。近7日只报总数和日均——
+        逐日数字排一长串在群里很难扫，谁真想看明细去小程序看。
+        monthuselist 不展示：条目粒度没有可靠依据（按天还是按月无公开文档），
+        实测取出来和近7日对不上，标成"上月"只会让人看不懂。
+
+        返回 (卡片文本, 剩余电量)；解析不出电量时抛 ValueError（带干净原因，不甩原始 JSON）。
         """
         candidates = []
         modlist = detail.get("modlist") or []
@@ -671,29 +681,32 @@ class DormPowerPlugin(Star):
             raise ValueError(f"电量字段解析失败（已试 {', '.join(odd_fields)}）")
 
         room_name = detail.get("roomfullname") or name
-        parts = [f"🏠{room_name}", f"剩余{cls._fmt_num(odd)}度"]
+        lines = [f"🏠 {room_name}"]
 
-        today = mod.get("todayuse")
-        if today is not None:
-            parts.append(f"今日{cls._fmt_num(today)}度")
+        head = f"⚡ 剩余 {cls._fmt_num(odd)} 度"
+        if mod.get("todayuse") is not None:
+            head += f" ｜ 今日 {cls._fmt_num(mod['todayuse'])} 度"
+        lines.append(head)
 
         week = [d for d in (mod.get("weekuselist") or []) if isinstance(d, dict)]
-        if week:
-            seg = " ".join(f"{str(d.get('weekday', '')).replace('星期', '')}"
-                           f"{cls._fmt_num(d.get('dayuse', d.get('use')))}" for d in week)
-            parts.append(f"近7日 {seg}")
+        days = []
+        for d in week:
+            try:
+                days.append(float(d.get("dayuse", d.get("use"))))
+            except (TypeError, ValueError):
+                continue
+        if days:
+            total = sum(days)
+            lines.append(f"📊 近7日 共{cls._fmt_num(total)}度 · 日均{total / len(days):.1f}")
 
-        month = [m for m in (mod.get("monthuselist") or []) if isinstance(m, dict)]
-        if month:
-            last = month[-1]
-            parts.append(f"上月{cls._fmt_num(last.get('monthuse'))}度")
-
+        tail = []
         if mod.get("sumbuy") is not None:
-            parts.append(f"累购{cls._fmt_num(mod['sumbuy'])}度")
-
+            tail.append(f"💳 累购 {cls._fmt_num(mod['sumbuy'])} 度")
         if detail.get("collecdate"):
-            parts.append(f"抄表{detail['collecdate']}")
-        return "｜".join(parts), odd
+            tail.append(f"🗓 抄表 {detail['collecdate']}")
+        if tail:
+            lines.append(" ｜ ".join(tail))
+        return "\n".join(lines), odd
 
     async def _query_room(self, customercode: int, account: str, roomverify: str, name: str) -> tuple[str, float]:
         detail = await self._post(customercode, {
@@ -846,7 +859,7 @@ class DormPowerPlugin(Star):
                     warn_lines.append(f"⚠️ {name} 剩余 {odd:g} 度，低于 {th:g} 度，请及时充值！")
             except Exception as e:
                 blocks.append(f"❌ {name}: {e}")
-        result = "\n".join(blocks)
+        result = "\n\n".join(blocks)
         if warn_lines:
             result += "\n" + "\n".join(warn_lines)
         yield event.plain_result(result)
@@ -1221,7 +1234,7 @@ class DormPowerPlugin(Star):
                             warns.append(f"⚠️ {name} 剩余 {odd:g} 度，低于 {th:g} 度，请及时充值！")
                     except Exception as e:
                         blocks.append(f"❌ {name}: {e}")
-                result = "\n".join(blocks)
+                result = "\n\n".join(blocks)
                 if warns:
                     result += "\n" + "\n".join(warns)
                 await self._send(origin, result)
