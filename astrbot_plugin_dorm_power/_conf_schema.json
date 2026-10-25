@@ -20,7 +20,7 @@
     "condition": "account"
   },
   "notice": {
-    "description": "📣 已接入：/电量 · /电量绑定 · /电量房间 · /电量添加 · /电量删除 · /电量推送 · /电量解绑 · /电量搜校",
+    "description": "📣 已接入：/电量 · /电量绑定 · /电量房间 · /电量添加 · /电量删除 · /电量推送 · /电量解绑 · /电量搜校 · /电量曲线",
     "type": "string",
     "default": "",
     "invisible": true
@@ -50,6 +50,12 @@
         "type": "string",
         "default": "8,20",
         "hint": "逗号分隔，8,20 = 每天 8 点和 20 点各播报一次"
+      },
+      "chart_capture_hours": {
+        "description": "曲线采样小时",
+        "type": "string",
+        "default": "*/2",
+        "hint": "每 2 小时自动记一个电量点（/电量曲线 的数据源）。支持 */N 或逗号小时如 0,6,12,18；留空关闭采样，只靠每日播报记录"
       },
       "warn_threshold": {
         "description": "低电量阈值",
@@ -164,6 +170,12 @@
         "description": "搜校探测 cmd",
         "type": "string",
         "default": "login"
+      },
+      "chart_font": {
+        "description": "图表字体文件",
+        "type": "string",
+        "default": "",
+        "hint": "画 /电量曲线 用的 ttf/otf 路径；留空自动探测系统中文字体（Windows 自带雅黑无需配置）"
       }
     }
   }

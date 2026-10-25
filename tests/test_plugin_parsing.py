@@ -8,6 +8,7 @@
 """
 import pathlib
 import re
+from datetime import datetime
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 # 布局自适应：发布仓插件文件在仓库根，工作区在 astrbot_plugin_dorm_power/ 子目录
@@ -15,7 +16,7 @@ _PLUGIN_DIR = ROOT if (ROOT / "main.py").is_file() else ROOT / "astrbot_plugin_d
 SRC = (_PLUGIN_DIR / "main.py").read_text(encoding="utf-8")
 START = SRC.index("API_URL =")
 END = SRC.index("class _ApiStatusError")
-ns = {"re": re}
+ns = {"re": re, "datetime": datetime}
 exec(compile(SRC[START:END], "main_extract", "exec"), ns)
 
 _parse_rooms_text = ns["_parse_rooms_text"]

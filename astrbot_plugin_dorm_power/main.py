@@ -10,6 +10,7 @@
   /电量推送                  在当前会话订阅每日定时播报
   /电量解绑                  清空自己的绑定
   /电量搜校 <账号>            扫描学校代码（无需抓包，限速跑，几分钟到几十分钟）
+  /电量曲线 [1-7]            近 N 天剩余电量折线图（自动定时采样，默认 7 天）
 
 兼容写法：指令可带 / 前缀；参数可与指令名粘连（如 电量删除1、电量绑定1000000 123...）。
 
@@ -53,6 +54,11 @@ USER_DATA_FILE = "dorm_power_users.json"
 KNOWN_CODES_FILE = "known_schools.json"
 # 上次播报读数（掉电速率预警用）：只存房间 HMAC 摘要 + 电量 + 时间，不含明文凭证
 LAST_READINGS_FILE = "last_readings.json"
+# 电量历史（/电量曲线 数据源）：{房间摘要: [[iso时间, 度], ...]}，只留最近几天
+HISTORY_FILE = "odd_history.json"
+HISTORY_KEEP_DAYS = 8   # 7 天视图 + 1 天余量
+# 曲线图临时文件前缀（发送后下轮清理）
+CHART_PREFIX = "curve_"
 # 老版本用的文件名（写在插件配置目录里，迁移时只读）
 _LEGACY_USER_FILE = "astrbot_plugin_dorm_power_users.json"
 _LEGACY_CODES_FILE = "dorm_power_known_schools.json"
@@ -93,6 +99,7 @@ USER_DATA_PATH = os.path.join(DATA_DIR, USER_DATA_FILE)
 # 命中过的学校代码候选池（只存数字代码，不含任何账号信息）
 KNOWN_CODES_PATH = os.path.join(DATA_DIR, KNOWN_CODES_FILE)
 LAST_READINGS_PATH = os.path.join(DATA_DIR, LAST_READINGS_FILE)
+HISTORY_PATH = os.path.join(DATA_DIR, HISTORY_FILE)
 
 
 def _legacy_path(filename: str) -> str | None:
@@ -219,12 +226,12 @@ SCAN_DEFAULTS = {"qps": 6.0, "concurrency": 6, "max_hits": 3, "cooldown_minutes"
 SCAN_LIMITS = {"qps": (1, 20), "concurrency": (1, 16), "max_hits": (1, 10),
                "cooldown_minutes": (0, 1440)}
 
-COMMANDS = ("电量", "电量绑定", "电量房间", "电量添加", "电量删除", "电量推送", "电量解绑", "电量搜校")
+COMMANDS = ("电量", "电量绑定", "电量房间", "电量添加", "电量删除", "电量推送", "电量解绑", "电量搜校", "电量曲线")
 # 读取配置时用于「没取到值」的哨兵：None/False/0 都是合法配置值，不能拿它们当缺省判断
 _MISSING = object()
 # 允许“指令名+参数粘连”的指令（如 电量删除1）：仅限参数以数字开头的这四条，
 # 避免“电量好低啊”“电量推送给我看看”这类日常聊天被误当成指令。
-GLUED_COMMANDS = ("电量搜校", "电量绑定", "电量添加", "电量删除")
+GLUED_COMMANDS = ("电量搜校", "电量绑定", "电量添加", "电量删除", "电量曲线")
 
 # WebUI rooms 配置框的模板：# 开头的说明行会被解析器忽略，末尾留空行方便直接填写
 ROOMS_TEMPLATE = (
@@ -301,6 +308,104 @@ def _should_warn(prev_odd, cur_odd, threshold, drop_per_hour,
             span = f"（{hours_between:.1f} 小时掉 {diff:.1f} 度）" if hours_between else f"（降 {diff:.1f} 度）"
             return f"掉电异常：{prev_odd:g} → {cur_odd:g} 度{span}"
     return None
+
+
+# ---------------------------------------------------------------- 折线图
+# 常见系统中文字体（按命中率排序）
+_CJK_FONT_CANDIDATES = (
+    r"C:\Windows\Fonts\msyh.ttc", r"C:\Windows\Fonts\msyh.ttf", r"C:\Windows\Fonts\simhei.ttf",
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
+    "/System/Library/Fonts/PingFang.ttc",
+)
+
+
+def _find_cjk_font(custom: str | None = None) -> str | None:
+    """找一块能画中文的字体：配置指定 > 常见系统路径；找不到返回 None（调用方降级为文本）。"""
+    if custom and os.path.isfile(custom):
+        return custom
+    for path in _CJK_FONT_CANDIDATES:
+        if os.path.isfile(path):
+            return path
+    return None
+
+
+def _render_curve_chart(path: str, series, font_path: str, t0: datetime, t1: datetime) -> None:
+    """画深色折线图：series = [(房间名, [(时间, 度), ...]), ...]，多房间纵向堆叠成一张 PNG。
+
+    用 Pillow 手绘（AstrBot 自带依赖）而不是 ECharts/matplotlib：Web 图表库要无头浏览器
+    （AstrBot 没给插件暴露 html_render），matplotlib 拖 numpy 一串重依赖还得配中文字体。
+    深色底是为群聊深色主题准备的——整张图自带背景色，不挑会话主题。
+    """
+    from PIL import Image, ImageDraw, ImageFont
+
+    W, H1, GAP = 900, 400, 36
+    PAD_L, PAD_R, PAD_T, PAD_B = 64, 96, 48, 36
+    BG, GRID = (21, 23, 30), (44, 48, 60)
+    TEXT, SUBTLE = (228, 230, 236), (150, 156, 170)
+    LINE, ACCENT = (79, 195, 247), (255, 202, 40)
+    f_title, f_axis, f_val = (ImageFont.truetype(font_path, s) for s in (22, 15, 19))
+    span_s = max(1.0, (t1 - t0).total_seconds())
+    short_span = span_s <= 1.5 * 86400   # 一天半以内按小时刻度，再长按天
+    fmt_x = "%H:%M" if short_span else "%m-%d %H时"
+    fmt_rng = "%m-%d %H:%M" if short_span else "%m-%d"
+
+    img = Image.new("RGB", (W, H1 * len(series) + GAP * (len(series) - 1)), BG)
+    draw = ImageDraw.Draw(img)
+
+    for i, (name, pts) in enumerate(series):
+        pts = sorted(pts)
+        top = i * (H1 + GAP)
+        pl, pr, pt_, pb = PAD_L, W - PAD_R, top + PAD_T, top + H1 - PAD_B
+        pw, ph = pr - pl, pb - pt_
+
+        draw.text((PAD_L, top + 12), name, font=f_title, fill=TEXT)
+        rng = f"{t0:{fmt_rng}} → {t1:{fmt_rng}}"
+        draw.text((W - PAD_R - draw.textlength(rng, font=f_axis), top + 16), rng,
+                  font=f_axis, fill=SUBTLE)
+
+        vals = [v for _t, v in pts]
+        lo, hi = min(vals), max(vals)
+        if lo == hi:
+            lo -= 1.0
+            hi += 1.0
+        pad = (hi - lo) * 0.1
+        lo, hi = lo - pad, hi + pad
+
+        def xpos(t: datetime) -> float:
+            return pl + pw * max(0.0, min(1.0, (t - t0).total_seconds() / span_s))
+
+        def ypos(v: float) -> float:
+            return pb - ph * ((v - lo) / (hi - lo))
+
+        for k in range(5):  # 横网格 + Y 刻度
+            v = lo + (hi - lo) * k / 4
+            y = ypos(v)
+            draw.line([(pl, y), (pr, y)], fill=GRID, width=1)
+            label = f"{v:.0f}" if hi - lo >= 10 else f"{v:.1f}"   # 电量读数没必要带一串小数
+            draw.text((pl - 8 - draw.textlength(label, font=f_axis), y - 8), label,
+                      font=f_axis, fill=SUBTLE)
+        for k in range(6):  # 竖网格 + X 刻度
+            t = t0 + (t1 - t0) * k / 5
+            x = xpos(t)
+            draw.line([(x, pt_), (x, pb)], fill=GRID, width=1)
+            label = f"{t:{fmt_x}}"
+            draw.text((x - draw.textlength(label, font=f_axis) / 2, pb + 8), label,
+                      font=f_axis, fill=SUBTLE)
+
+        xy = [(xpos(t), ypos(v)) for t, v in pts]
+        if len(xy) >= 2:
+            draw.line(xy, fill=LINE, width=3, joint="curve")
+        if len(xy) <= 40:
+            r = 3
+            for x, y in xy:
+                draw.ellipse([x - r, y - r, x + r, y + r], fill=LINE)
+        lx, lv = pts[-1][0], pts[-1][1]
+        draw.text((min(pr, xpos(lx) + 10), min(pb - 20, ypos(lv) - 10)), f"{lv:g}",
+                  font=f_val, fill=ACCENT)
+
+    img.save(path, "PNG")
 
 
 class _ApiStatusError(RuntimeError):
@@ -426,7 +531,7 @@ class _ScanGuard:
         return True
 
 
-@register("dorm_power", "suiren0219", "宿舍电量查询与定时播报（完美校园，多用户自助）", "v2.2.4")
+@register("dorm_power", "suiren0219", "宿舍电量查询与定时播报（完美校园，多用户自助）", "v2.3.0")
 class DormPowerPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig | None = None):
         super().__init__(context)
@@ -595,6 +700,151 @@ class DormPowerPlugin(Star):
         except OSError as e:
             logger.warning("[dorm_power] 上次读数保存失败: %s", e)
 
+    # ---------- 电量历史（/电量曲线 数据源） ----------
+    def _load_history(self) -> dict:
+        """{房间摘要: [[iso时间, 度], ...]}；文件坏了当没有历史。"""
+        try:
+            with open(HISTORY_PATH, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            return data if isinstance(data, dict) else {}
+        except (FileNotFoundError, json.JSONDecodeError, OSError):
+            return {}
+
+    def _save_history(self, history: dict) -> None:
+        try:
+            os.makedirs(os.path.dirname(HISTORY_PATH) or ".", exist_ok=True)
+            tmp = HISTORY_PATH + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(history, f, ensure_ascii=False)
+            os.replace(tmp, HISTORY_PATH)
+        except OSError as e:
+            logger.warning("[dorm_power] 电量历史保存失败: %s", e)
+
+    def _append_history(self, points: dict, now: datetime) -> None:
+        """追加采样点；同一分钟重复采样覆盖（播报与采样任务撞点时只留一条）。"""
+        history = self._load_history()
+        stamp = now.isoformat(timespec="seconds")
+        minute = stamp[:16]
+        for tag, odd in points.items():
+            pts = history.setdefault(tag, [])
+            if pts and str(pts[-1][0])[:16] == minute:
+                pts[-1] = [stamp, odd]
+            else:
+                pts.append([stamp, odd])
+        cutoff = (now - timedelta(days=HISTORY_KEEP_DAYS)).isoformat(timespec="seconds")
+        for tag in list(history):
+            kept = [p for p in history[tag] if isinstance(p, list) and len(p) >= 2
+                    and str(p[0]) >= cutoff]
+            if kept:
+                history[tag] = kept
+            else:
+                del history[tag]  # 过期/坏数据的房间摘要直接清掉，文件不无限膨胀
+        self._save_history(history)
+
+    def _collect_jobs(self) -> list:
+        """汇总所有要查询的 (origin, code, account, rooms)，同一组合去重。"""
+        jobs, seen = [], set()
+        for user in self._users.values():
+            rooms = self._norm_rooms(user.get("rooms"))
+            if user.get("origin") and rooms:
+                key = self._report_key(user["origin"], user.get("customercode"),
+                                       user.get("account"), rooms)
+                if key not in seen:
+                    seen.add(key)
+                    jobs.append((user["origin"], user.get("customercode"),
+                                 user.get("account"), rooms))
+        g = self._global_cfg()
+        rooms = self._norm_rooms(g.get("rooms"))
+        if g.get("origin") and rooms:
+            key = self._report_key(g["origin"], g.get("customercode"), g.get("account"), rooms)
+            if key not in seen:
+                seen.add(key)
+                jobs.append((g["origin"], g.get("customercode"), g.get("account"), rooms))
+        return jobs
+
+    async def _capture_readings(self) -> None:
+        """定时采样：把所有监控房间的剩余电量记进历史（/电量曲线 的数据源）。失败静默。"""
+        self._load_users()
+        jobs = self._collect_jobs()
+        if not jobs:
+            return
+        now = datetime.now()
+        points: dict[str, float] = {}
+        for _origin, code, account, rooms in jobs:
+            for name, rv in rooms:
+                try:
+                    _text, odd = await self._query_room(code, account, rv, name)
+                except Exception as e:
+                    logger.debug("[dorm_power] 曲线采样失败(%s): %s", name, e)
+                    continue
+                tag = self._room_tag(rv)
+                if tag is not None:
+                    points[tag] = odd
+        if points:
+            self._append_history(points, now)
+            logger.info("[dorm_power] 曲线采样完成：%d 个房间", len(points))
+
+    async def _h_curve(self, event, args):
+        uid, user = self._user_of(event)
+        g = self._global_cfg()
+        if user and user.get("rooms"):
+            rooms = user["rooms"]
+        elif g["rooms"]:
+            rooms = g["rooms"]
+            yield event.plain_result("ℹ️ 你还未绑定，以下为默认房间的曲线。\n")
+        else:
+            yield event.plain_result(
+                "还没有可画的数据。先 /电量绑定 <学校代码> <账号> 并 /电量添加 房间，"
+                "等自动采样积累一段时间后再来。")
+            return
+        days = 7
+        if args and args[0].isdigit():
+            days = max(1, min(7, int(args[0])))
+        history = self._load_history()
+        now = datetime.now()
+        since = now - timedelta(days=days)
+        series = []
+        for name, rv in rooms:
+            tag = self._room_tag(rv)
+            raw = history.get(tag) if tag else None
+            pts = []
+            for p in raw or []:
+                if not isinstance(p, list) or len(p) < 2:
+                    continue
+                try:
+                    t = datetime.fromisoformat(str(p[0]))
+                    pts.append((t, float(p[1])))
+                except (TypeError, ValueError):
+                    continue
+            pts = [(t, v) for t, v in pts if t >= since]
+            if pts:
+                series.append((str(name), pts))
+        if not series:
+            yield event.plain_result(
+                f"最近 {days} 天还没有采样点。插件会按「曲线采样小时」自动记录"
+                "（每日播报也会各记一个点），过几个小时再来看看。")
+            return
+        font_path = _find_cjk_font(self._cfg_get("chart_font") or None)
+        if not font_path:
+            yield event.plain_result(
+                "服务器上没找到中文字体，画不了图。可在插件配置「图表字体文件」里指定 "
+                "ttf/otf 路径（Windows 自带微软雅黑，一般无需配置）。")
+            return
+        try:  # 清掉上一轮的临时图，避免 plugin_data 里堆积
+            for f in os.listdir(DATA_DIR):
+                if f.startswith(CHART_PREFIX) and f.endswith(".png"):
+                    os.remove(os.path.join(DATA_DIR, f))
+        except OSError:
+            pass
+        out = os.path.join(DATA_DIR, f"{CHART_PREFIX}{int(time.time() * 1000)}.png")
+        try:
+            _render_curve_chart(out, series, font_path, since, now)
+        except Exception as e:
+            logger.warning("[dorm_power] 画曲线图失败: %s", e)
+            yield event.plain_result(f"画图失败：{e}")
+            return
+        yield event.image_result(out)
+
     def _cfg_set(self, key: str, value) -> bool:
         """写回配置：分组式 schema 写到已有的分组里，平铺配置写到顶层。"""
         try:
@@ -644,10 +894,14 @@ class DormPowerPlugin(Star):
 
     async def initialize(self):
         hours = "8,20"
+        capture_hours = "*/2"
         if self.config is not None:
             hours = str(self._cfg_get("cron_hours") or "8,20")
+            # 留空 = 关闭自动采样，只靠每日播报各记一个点
+            capture_hours = str(self._cfg_get("chart_capture_hours") or "*/2")
             self._migrate_rooms_hint()
         self.scheduler.add_job(self._scheduled_report, "cron", hour=hours, minute=0)
+        self.scheduler.add_job(self._capture_readings, "cron", hour=capture_hours, minute=0)
         self.scheduler.start()
         if self._box.available:
             logger.info("[dorm_power] 用户数据加密存储已启用（后端 %s）", self._box.backend_name)
@@ -881,6 +1135,12 @@ class DormPowerPlugin(Star):
         async for r in self._h_scan(event, self._args(event, "电量搜校")):
             yield r
 
+    @filter.command("电量曲线")
+    async def cmd_curve(self, event):
+        """近 N 天电量折线图：/电量曲线 [1-7]（自动定时采样，默认 7 天）"""
+        async for r in self._h_curve(event, self._args(event, "电量曲线")):
+            yield r
+
     @filter.event_message_type(filter.EventMessageType.ALL)
     async def cmd_glued(self, event):
         """兜底：兼容指令名和参数粘连的写法（电量删除1、电量绑定1000000 xxx 等）。
@@ -906,6 +1166,8 @@ class DormPowerPlugin(Star):
                 gen = self._h_add(event, args)
             elif cmd == "电量删除":
                 gen = self._h_del(event, args)
+            elif cmd == "电量曲线":
+                gen = self._h_curve(event, args)
             else:
                 gen = self._h_scan(event, args)
             async for r in gen:
@@ -1286,24 +1548,7 @@ class DormPowerPlugin(Star):
     # ---------- 定时播报 ----------
     async def _scheduled_report(self):
         self._load_users()  # 播报前重读，拿到最新绑定
-        jobs = []  # (origin, code, account, rooms)
-        seen = set()
-        for user in self._users.values():
-            rooms = self._norm_rooms(user.get("rooms"))
-            if user.get("origin") and rooms:
-                key = self._report_key(user["origin"], user.get("customercode"),
-                                       user.get("account"), rooms)
-                if key not in seen:
-                    seen.add(key)
-                    jobs.append((user["origin"], user.get("customercode"),
-                                 user.get("account"), rooms))
-        g = self._global_cfg()
-        rooms = self._norm_rooms(g.get("rooms"))
-        if g.get("origin") and rooms:
-            key = self._report_key(g["origin"], g.get("customercode"), g.get("account"), rooms)
-            if key not in seen:
-                seen.add(key)
-                jobs.append((g["origin"], g.get("customercode"), g.get("account"), rooms))
+        jobs = self._collect_jobs()
         th = self._threshold()
         drop_th = self._drop_threshold()
         # 读数历史只在播报时记录/比较（USAGE 里写明的契约）：手动 /电量 频次不可控，

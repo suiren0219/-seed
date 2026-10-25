@@ -16,6 +16,7 @@ import shutil
 import sys
 import tempfile
 import types
+from datetime import datetime, timedelta
 
 import pytest
 
@@ -178,8 +179,8 @@ def test_register_and_commands(loaded):
     cmds = {fn.__is_command__ for _n, fn in vars(cls).items()
             if callable(fn) and getattr(fn, "__is_command__", None)}
     want = {"电量", "电量绑定", "电量房间", "电量添加", "电量删除",
-            "电量推送", "电量解绑", "电量搜校"}
-    assert cmds == want, f"8 条命令应齐全，实际 {cmds}"
+            "电量推送", "电量解绑", "电量搜校", "电量曲线"}
+    assert cmds == want, f"9 条命令应齐全，实际 {cmds}"
 
     assert _metadata_version() == version, "metadata.yaml 版本应与 @register 一致"
 
@@ -302,6 +303,106 @@ def test_readings_store_roundtrip(plugin, loaded):
     finally:
         if os.path.exists(mod.LAST_READINGS_PATH):
             os.remove(mod.LAST_READINGS_PATH)
+
+
+def test_history_roundtrip_and_prune(plugin, loaded):
+    """/电量曲线 的数据源：追加、同分钟覆盖、过期裁剪。"""
+    _reg, mod = loaded
+    now = datetime.now()
+    old = (now - timedelta(days=30)).isoformat(timespec="seconds")
+    try:
+        plugin._save_history({"rk_old": [[old, 9.0]]})       # 30 天前的过期数据
+        plugin._append_history({"rk_a": 5.0}, now)
+        plugin._append_history({"rk_a": 6.0}, now)           # 同分钟 → 覆盖不重复
+        plugin._append_history({"rk_b": 7.0}, now)
+        h = plugin._load_history()
+        assert "rk_old" not in h, "过期摘要应被裁掉"
+        assert h["rk_a"][-1][1] == 6.0, "同分钟重复采样应覆盖"
+        assert h["rk_b"][-1][1] == 7.0
+        assert len(h["rk_a"]) == 1
+    finally:
+        if os.path.exists(mod.HISTORY_PATH):
+            os.remove(mod.HISTORY_PATH)
+
+
+def test_render_curve_chart(loaded):
+    """深色折线图：能出 PNG、尺寸正确、背景是深色。"""
+    _reg, mod = loaded
+    pytest.importorskip("PIL")
+    font = mod._find_cjk_font(None)
+    if not font:
+        pytest.skip("本机没有常见中文字体")
+    now = datetime.now()
+    pts = [(now - timedelta(hours=h), 100.0 + (12 - h) * 1.5) for h in range(12, -1, -2)]
+    out = os.path.join(mod.DATA_DIR, "curve_test.png")
+    try:
+        mod._render_curve_chart(out, [("测试房间", pts)], font,
+                                now - timedelta(hours=12), now)
+        from PIL import Image
+        with Image.open(out) as im:
+            assert im.size[0] == 900 and im.size[1] >= 400
+            assert im.convert("RGB").getpixel((10, 10)) == (21, 23, 30), "背景应为深色"
+    finally:
+        if os.path.exists(out):
+            os.remove(out)
+
+
+def test_curve_handler(plugin, loaded):
+    """/电量曲线：无数据给文本提示；有数据且找得到字体时返回图片。"""
+    _reg, mod = loaded
+    if not mod._find_cjk_font(None):
+        pytest.skip("本机没有常见中文字体")
+
+    class FakeEvent:
+        def __init__(self):
+            self.texts, self.images = [], []
+
+        def get_sender_id(self):
+            return "u1"
+
+        def plain_result(self, t):
+            self.texts.append(t)
+            return ("plain", t)
+
+        def image_result(self, p):
+            self.images.append(p)
+            return ("image", p)
+
+    orig_load = plugin._load_users
+    orig_users = plugin._users
+    now = datetime.now()
+    try:
+        plugin._load_users = lambda: None   # 挡住重读文件，直接注入绑定
+        plugin._users = {"u1": {"customercode": 1000145, "account": "x",
+                                "rooms": [["测试房", "101-1--12-102"]], "origin": ""}}
+
+        async def collect(ev, args):
+            return [r async for r in plugin._h_curve(ev, args)]
+
+        ev = FakeEvent()
+        asyncio.run(collect(ev, []))
+        assert ev.texts and not ev.images, "无数据应给文本提示"
+
+        tag = plugin._room_tag("101-1--12-102")
+        pts = [[(now - timedelta(hours=h)).isoformat(timespec="seconds"), 50.0 + (12 - h)]
+               for h in range(12, -1, -2)]
+        plugin._save_history({tag: pts})
+        ev2 = FakeEvent()
+        asyncio.run(collect(ev2, ["7"]))
+        assert ev2.images and not ev2.texts, "有数据应返回图片"
+        assert os.path.isfile(ev2.images[0])
+        os.remove(ev2.images[0])
+
+        ev3 = FakeEvent()
+        old_pts = [[(now - timedelta(days=8)).isoformat(timespec="seconds"), 40.0]]
+        plugin._save_history({tag: old_pts})   # 数据在 8 天前，3 天视图里应该没有
+        asyncio.run(collect(ev3, ["3"]))
+        assert ev3.texts and not ev3.images, "采样点都在范围之外时应提示无数据"
+    finally:
+        plugin._load_users = orig_load
+        plugin._users = orig_users
+        if os.path.exists(mod.HISTORY_PATH):
+            os.remove(mod.HISTORY_PATH)
 
 
 def test_cfg_defaults_tolerance(plugin):
