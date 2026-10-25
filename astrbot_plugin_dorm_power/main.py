@@ -408,6 +408,19 @@ def _render_curve_chart(path: str, series, font_path: str, t0: datetime, t1: dat
     img.save(path, "PNG")
 
 
+def _norm_capture_hours(spec) -> str:
+    """规范化采样配置：None→默认每 2 小时；纯数字 N→每 N 小时（*/N）；空串→关闭采样；
+    其余（*/N、逗号小时列表）原样透传给 APScheduler 的 hour 字段。"""
+    if spec is None:
+        return "*/2"
+    s = str(spec).strip()
+    if s == "":
+        return ""
+    if s.isdigit():
+        return f"*/{max(1, int(s))}"
+    return s
+
+
 class _ApiStatusError(RuntimeError):
     """HTTP 层错误（429/5xx 等），可重试。"""
 
@@ -531,7 +544,7 @@ class _ScanGuard:
         return True
 
 
-@register("dorm_power", "suiren0219", "宿舍电量查询与定时播报（完美校园，多用户自助）", "v2.3.0")
+@register("dorm_power", "suiren0219", "宿舍电量查询与定时播报（完美校园，多用户自助）", "v2.3.1")
 class DormPowerPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig | None = None):
         super().__init__(context)
@@ -820,9 +833,16 @@ class DormPowerPlugin(Star):
             if pts:
                 series.append((str(name), pts))
         if not series:
+            spec = _norm_capture_hours(self._cfg_get("chart_capture_hours"))
+            if spec.startswith("*/"):
+                spec_txt = f"每 {spec[2:]} 小时记一个点"
+            elif spec:
+                spec_txt = f"每天 {spec} 点各记一个"
+            else:
+                spec_txt = "采样已关闭，只有每日播报会记点"
             yield event.plain_result(
-                f"最近 {days} 天还没有采样点。插件会按「曲线采样小时」自动记录"
-                "（每日播报也会各记一个点），过几个小时再来看看。")
+                f"最近 {days} 天还没有采样点（当前配置：{spec_txt}，每日播报也会各记一个）。"
+                "过几个小时再来看看。")
             return
         font_path = _find_cjk_font(self._cfg_get("chart_font") or None)
         if not font_path:
@@ -897,11 +917,13 @@ class DormPowerPlugin(Star):
         capture_hours = "*/2"
         if self.config is not None:
             hours = str(self._cfg_get("cron_hours") or "8,20")
-            # 留空 = 关闭自动采样，只靠每日播报各记一个点
-            capture_hours = str(self._cfg_get("chart_capture_hours") or "*/2")
+            capture_hours = _norm_capture_hours(self._cfg_get("chart_capture_hours"))
             self._migrate_rooms_hint()
         self.scheduler.add_job(self._scheduled_report, "cron", hour=hours, minute=0)
-        self.scheduler.add_job(self._capture_readings, "cron", hour=capture_hours, minute=0)
+        if capture_hours:
+            self.scheduler.add_job(self._capture_readings, "cron", hour=capture_hours, minute=0)
+        else:
+            logger.info("[dorm_power] 曲线采样已关闭，仅每日播报各记一个数据点")
         self.scheduler.start()
         if self._box.available:
             logger.info("[dorm_power] 用户数据加密存储已启用（后端 %s）", self._box.backend_name)

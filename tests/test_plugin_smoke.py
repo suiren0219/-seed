@@ -305,6 +305,42 @@ def test_readings_store_roundtrip(plugin, loaded):
             os.remove(mod.LAST_READINGS_PATH)
 
 
+def test_norm_capture_hours(loaded):
+    """采样间隔配置：纯数字 = 每 N 小时；空串 = 关闭；缺省 = 每 2 小时。"""
+    _reg, mod = loaded
+    f = mod._norm_capture_hours
+    assert f(None) == "*/2"
+    assert f("") == ""                      # 留空 = 关闭采样（只靠每日播报记点）
+    assert f("4") == "*/4"                  # 「多少小时一次」最直观的写法
+    assert f("0") == "*/1"
+    assert f("*/6") == "*/6"
+    assert f("0,6,12,18") == "0,6,12,18"
+
+
+def test_capture_schedule_config(loaded):
+    """initialize 应按配置注册采样任务；留空时不注册（只留播报任务）。"""
+    _reg, mod = loaded
+    cls = loaded[0][0][0]
+
+    class _Cfg(dict):
+        def save_config(self):
+            pass
+
+    async def jobs_for(capture_val):
+        cfg = _Cfg({"schedule": {"cron_hours": "8,20", "chart_capture_hours": capture_val},
+                    "rooms": "", "account": "", "customercode": 1000000,
+                    "encrypt_key": "", "notify_origin": ""})
+        p = cls(context=object(), config=cfg)
+        await p.initialize()
+        hours = [k.get("hour") for _a, k in p.scheduler.jobs]
+        return hours
+
+    hours = asyncio.run(jobs_for("6"))
+    assert hours.count("*/6") == 1 and "8,20" in hours, hours
+    hours = asyncio.run(jobs_for(""))
+    assert "*/2" not in hours and "*/6" not in hours and "8,20" in hours, "留空应不注册采样任务"
+
+
 def test_history_roundtrip_and_prune(plugin, loaded):
     """/电量曲线 的数据源：追加、同分钟覆盖、过期裁剪。"""
     _reg, mod = loaded
